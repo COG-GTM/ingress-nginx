@@ -230,7 +230,7 @@ local function route_to_alternative_balancer(balancer)
       end
     elseif traffic_shaping_policy.headerPattern
        and #traffic_shaping_policy.headerPattern > 0 then
-      local m, err = ngx.re.match(header, traffic_shaping_policy.headerPattern)
+      local m, err = ngx.re.match(header, traffic_shaping_policy.headerPattern, "jo")
       if m then
         return true
       elseif  err then

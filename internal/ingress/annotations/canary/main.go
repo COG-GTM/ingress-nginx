@@ -74,12 +74,13 @@ var CanaryAnnotations = parser.Annotation{
 			It doesn't have any effect if the 'canary-by-header' annotation is not defined`,
 		},
 		canaryByHeaderPatternAnnotation: {
-			Validator: parser.ValidateRegex(parser.IsValidRegex, false),
+			Validator: parser.ValidateBacktrackingSafeRegex,
 			Scope:     parser.AnnotationScopeIngress,
 			Risk:      parser.AnnotationRiskMedium,
 			Documentation: `This annotation works the same way as canary-by-header-value except it does PCRE Regex matching. 
 			Note that when 'canary-by-header-value' is set this annotation will be ignored. 
-			When the given Regex causes error during request processing, the request will be considered as not matching.`,
+			When the given Regex causes error during request processing, the request will be considered as not matching.
+			Patterns that nest unbounded quantifiers, such as (a+)+, are rejected.`,
 		},
 		canaryByCookieAnnotation: {
 			Validator: parser.ValidateRegex(parser.BasicCharsRegex, true),

@@ -337,6 +337,31 @@ describe("Balancer", function()
             reset_ngx()
           end
         end)
+
+        it("matches canary-by-header-pattern with a cached JIT-compiled regex", function()
+          local match_spy = spy.on(ngx.re, "match")
+          local test_patterns = {
+            { request_header_value = "DoCanary", expected_result = true },
+            { request_header_value = "Docanary", expected_result = false },
+          }
+
+          for _, test_pattern in pairs(test_patterns) do
+            mock_ngx({ var = {
+              ["http_canaryHeader"] = test_pattern.request_header_value,
+              request_uri = "/"
+            }})
+            backend.trafficShapingPolicy.header = "canaryHeader"
+            backend.trafficShapingPolicy.headerValue = ""
+            backend.trafficShapingPolicy.headerPattern = "^Do[A-Z][a-z]+y$"
+            balancer.sync_backend(backend)
+            assert.message("\nHeader value: " .. test_pattern.request_header_value)
+              .equal(test_pattern.expected_result, balancer.route_to_alternative_balancer(_primaryBalancer))
+            reset_ngx()
+          end
+
+          assert.spy(match_spy).was_called_with(match.is_string(), "^Do[A-Z][a-z]+y$", "jo")
+          match_spy:revert()
+        end)
       end)
 
     end)
