@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/ingress-nginx/internal/ingress/annotations"
@@ -310,6 +312,27 @@ func (n *NGINXController) CheckWarning(ing *networking.Ingress) ([]string, error
 	return warnings, nil
 }
 
+var uidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// validateIngressMetadata ensures the identifying metadata of an Ingress
+// received through the admission webhook is well formed. These values are
+// used to build nginx configuration identifiers and must not be trusted.
+func validateIngressMetadata(ing *networking.Ingress) error {
+	if errs := validation.IsDNS1123Label(ing.Namespace); len(errs) > 0 {
+		return fmt.Errorf("namespace %q is invalid: %s", ing.Namespace, strings.Join(errs, ", "))
+	}
+
+	if errs := validation.IsDNS1123Subdomain(ing.Name); len(errs) > 0 {
+		return fmt.Errorf("name %q is invalid: %s", ing.Name, strings.Join(errs, ", "))
+	}
+
+	if ing.UID != "" && !uidRegex.MatchString(string(ing.UID)) {
+		return fmt.Errorf("uid %q is not a valid UUID", ing.UID)
+	}
+
+	return nil
+}
+
 // CheckIngress returns an error in case the provided ingress, when added
 // to the current configuration, generates an invalid configuration
 func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
@@ -323,6 +346,10 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 	// Skip checks if the ingress is marked as deleted
 	if !ing.DeletionTimestamp.IsZero() {
 		return nil
+	}
+
+	if err := validateIngressMetadata(ing); err != nil {
+		return fmt.Errorf("invalid object metadata: %w", err)
 	}
 
 	if n.cfg.DeepInspector {

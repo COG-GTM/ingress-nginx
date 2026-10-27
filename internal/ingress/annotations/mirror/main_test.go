@@ -124,3 +124,18 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestParseInvalidUID(t *testing.T) {
+	ing := &networking.Ingress{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:        "foo",
+			Namespace:   api.NamespaceDefault,
+			UID:         "x;\nreturn 200;",
+			Annotations: map[string]string{parser.GetAnnotationWithPrefix(mirrorTargetAnnotation): "http://some.test.env.com"},
+		},
+	}
+
+	if _, err := NewParser(&resolver.Mock{}).Parse(ing); err == nil {
+		t.Errorf("expected error for ingress with invalid uid")
+	}
+}

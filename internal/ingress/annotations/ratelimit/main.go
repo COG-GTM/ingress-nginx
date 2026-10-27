@@ -19,6 +19,7 @@ package ratelimit
 import (
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 
 	networking "k8s.io/api/networking/v1"
@@ -257,6 +258,12 @@ func (a ratelimit) Parse(ing *networking.Ingress) (interface{}, error) {
 		}, nil
 	}
 
+	for _, v := range []string{ing.GetNamespace(), ing.GetName(), string(ing.UID)} {
+		if !zoneNameRegex.MatchString(v) {
+			return nil, errors.NewValidationError(limitRateRPSAnnotation)
+		}
+	}
+
 	zoneName := fmt.Sprintf("%v_%v_%v", ing.GetNamespace(), ing.GetName(), ing.UID)
 
 	return &Config{
@@ -285,6 +292,10 @@ func (a ratelimit) Parse(ing *networking.Ingress) (interface{}, error) {
 		Allowlist:      cidrs,
 	}, nil
 }
+
+// zoneNameRegex restricts the values used to build rate limit zone names to
+// characters that cannot alter the generated nginx configuration.
+var zoneNameRegex = regexp.MustCompile(`^[A-Za-z0-9._-]*$`)
 
 func encode(s string) string {
 	str := base64.URLEncoding.EncodeToString([]byte(s))
