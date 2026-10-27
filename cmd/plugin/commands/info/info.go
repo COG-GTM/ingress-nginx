@@ -53,7 +53,7 @@ func info(flags *genericclioptions.ConfigFlags, serviceName string) error {
 		return err
 	}
 
-	fmt.Printf("Service cluster IP address: %v\n", service.Spec.ClusterIP)
-	fmt.Printf("LoadBalancer IP|CNAME: %v\n", service.Spec.LoadBalancerIP)
+	fmt.Printf("Service cluster IP address: %v\n", util.EscapeTerminal(service.Spec.ClusterIP))
+	fmt.Printf("LoadBalancer IP|CNAME: %v\n", util.EscapeTerminal(service.Spec.LoadBalancerIP))
 	return nil
 }

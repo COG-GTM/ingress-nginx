@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	apiv1 "k8s.io/api/core/v1"
@@ -42,8 +44,40 @@ var versionRegex = regexp.MustCompile(`(\d)+\.(\d)+\.(\d)+.*`)
 // PrintError receives an error value and prints it if it exists
 func PrintError(e error) {
 	if e != nil {
-		fmt.Println(e)
+		fmt.Println(EscapeTerminalMultiline(e.Error()))
 	}
+}
+
+// EscapeTerminal makes a single-line value taken from the cluster safe to print
+// to a terminal: every non-printable rune (including tab and newline) and every
+// invalid UTF-8 byte is replaced with its Go escape sequence, e.g. ESC becomes `\x1b`.
+func EscapeTerminal(s string) string {
+	return escapeNonPrintable(s, false)
+}
+
+// EscapeTerminalMultiline is like EscapeTerminal but keeps newlines and tabs,
+// for multi-line output such as nginx.conf or JSON documents.
+func EscapeTerminalMultiline(s string) string {
+	return escapeNonPrintable(s, true)
+}
+
+func escapeNonPrintable(s string, keepLayout bool) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, "\\x%02x", s[i])
+		case unicode.IsPrint(r), keepLayout && (r == '\n' || r == '\t'):
+			b.WriteString(s[i : i+size])
+		default:
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+		}
+		i += size
+	}
+	return b.String()
 }
 
 // ParseVersionString returns the major, minor, and patch numbers of a version string

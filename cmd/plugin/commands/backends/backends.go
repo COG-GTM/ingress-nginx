@@ -84,6 +84,6 @@ func backends(flags *genericclioptions.ConfigFlags, podName, deployment, selecto
 		return err
 	}
 
-	fmt.Print(out)
+	fmt.Print(util.EscapeTerminalMultiline(out))
 	return nil
 }

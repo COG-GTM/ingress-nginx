@@ -18,7 +18,9 @@ package ingresses
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -85,21 +87,10 @@ func ingresses(flags *genericclioptions.ConfigFlags, host string, allNamespaces 
 	printer := tabwriter.NewWriter(os.Stdout, 6, 4, 3, ' ', 0)
 	defer printer.Flush()
 
-	if allNamespaces {
-		fmt.Fprintln(printer, "NAMESPACE\tINGRESS NAME\tHOST+PATH\tADDRESSES\tTLS\tSERVICE\tSERVICE PORT\tENDPOINTS")
-	} else {
-		fmt.Fprintln(printer, "INGRESS NAME\tHOST+PATH\tADDRESSES\tTLS\tSERVICE\tSERVICE PORT\tENDPOINTS")
-	}
+	writeIngressHeader(printer, allNamespaces)
 
 	for i := range rows {
 		row := &rows[i]
-		var tlsMsg string
-		if row.TLS {
-			tlsMsg = "YES"
-		} else {
-			tlsMsg = "NO"
-		}
-
 		numEndpoints, err := request.GetNumEndpoints(flags, row.Namespace, row.ServiceName)
 		if err != nil {
 			return err
@@ -110,14 +101,45 @@ func ingresses(flags *genericclioptions.ConfigFlags, host string, allNamespaces 
 			row.NumEndpoints = fmt.Sprint(*numEndpoints)
 		}
 
-		if allNamespaces {
-			fmt.Fprintf(printer, "%v\t%v\t%v\t%v\t%v\t%v\t%v\t%v\n", row.Namespace, row.IngressName, row.Host+row.Path, row.Address, tlsMsg, row.ServiceName, row.ServicePort, row.NumEndpoints)
-		} else {
-			fmt.Fprintf(printer, "%v\t%v\t%v\t%v\t%v\t%v\t%v\n", row.IngressName, row.Host+row.Path, row.Address, tlsMsg, row.ServiceName, row.ServicePort, row.NumEndpoints)
-		}
+		writeIngressRow(printer, row, allNamespaces)
 	}
 
 	return nil
+}
+
+func writeIngressHeader(w io.Writer, allNamespaces bool) {
+	if allNamespaces {
+		fmt.Fprintln(w, "NAMESPACE\tINGRESS NAME\tHOST+PATH\tADDRESSES\tTLS\tSERVICE\tSERVICE PORT\tENDPOINTS")
+	} else {
+		fmt.Fprintln(w, "INGRESS NAME\tHOST+PATH\tADDRESSES\tTLS\tSERVICE\tSERVICE PORT\tENDPOINTS")
+	}
+}
+
+// writeIngressRow prints one row; every field comes from cluster objects, so
+// each one is escaped to keep control sequences from reaching the terminal.
+func writeIngressRow(w io.Writer, row *ingressRow, allNamespaces bool) {
+	tlsMsg := "NO"
+	if row.TLS {
+		tlsMsg = "YES"
+	}
+
+	fields := []string{
+		row.IngressName,
+		row.Host + row.Path,
+		row.Address,
+		tlsMsg,
+		row.ServiceName,
+		row.ServicePort,
+		row.NumEndpoints,
+	}
+	if allNamespaces {
+		fields = append([]string{row.Namespace}, fields...)
+	}
+	for i := range fields {
+		fields[i] = util.EscapeTerminal(fields[i])
+	}
+
+	fmt.Fprintln(w, strings.Join(fields, "\t"))
 }
 
 type ingressRow struct {
