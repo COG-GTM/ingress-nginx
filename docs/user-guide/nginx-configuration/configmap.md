@@ -689,7 +689,7 @@ Enables or disables the [PROXY protocol](https://www.nginx.com/resources/admin-g
 
 ## proxy-protocol-header-timeout
 
-Sets the timeout value for receiving the proxy-protocol headers. The default of 5 seconds prevents the TLS passthrough handler from waiting indefinitely on a dropped connection.
+Sets the timeout value for receiving the proxy-protocol headers. The default of 5 seconds prevents the TLS passthrough handler from waiting indefinitely on a dropped connection. When SSL passthrough is enabled, the same timeout also limits how long a client may take to send its TLS ClientHello.
 _**default:**_ 5s
 
 ## enable-aio-write
@@ -860,7 +860,7 @@ Sets parameters for a shared memory zone that will keep states for various keys 
 
 ## proxy-stream-timeout
 
-Sets the timeout between two successive read or write operations on client or proxied server connections. If no data is transmitted within this time, the connection is closed.
+Sets the timeout between two successive read or write operations on client or proxied server connections. If no data is transmitted within this time, the connection is closed. When SSL passthrough is enabled, it is also the idle timeout of connections proxied by the passthrough listener.
 
 _References:_
 [https://nginx.org/en/docs/stream/ngx_stream_proxy_module.html#proxy_timeout](https://nginx.org/en/docs/stream/ngx_stream_proxy_module.html#proxy_timeout)

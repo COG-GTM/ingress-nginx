@@ -823,6 +823,8 @@ func (n *NGINXController) setupSSLProxy() {
 			Port:          proxyPort,
 			ProxyProtocol: true,
 		},
+		HandshakeTimeout: cfg.ProxyProtocolHeaderTimeout,
+		IdleTimeout:      parseStreamTimeout(cfg.ProxyStreamTimeout),
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%v", sslPort))
@@ -855,6 +857,20 @@ func (n *NGINXController) setupSSLProxy() {
 			go n.Proxy.Handle(conn)
 		}
 	}()
+}
+
+// parseStreamTimeout converts an NGINX time value such as "600s" or "600"
+// into a time.Duration. Invalid values fall back to tcpproxy.DefaultIdleTimeout.
+func parseStreamTimeout(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if d, err := time.ParseDuration(value); err == nil && d > 0 {
+		return d
+	}
+	klog.Warningf("Invalid proxy-stream-timeout %q for SSL passthrough, using %v", value, tcpproxy.DefaultIdleTimeout)
+	return tcpproxy.DefaultIdleTimeout
 }
 
 // configureDynamically encodes new Backends in JSON format and POSTs the
