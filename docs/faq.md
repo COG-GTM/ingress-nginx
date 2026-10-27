@@ -11,6 +11,8 @@ For example, enabling snippets, a global configuration, allows any Ingress objec
 
 We changed the default to allow snippets to `false` in https://github.com/kubernetes/ingress-nginx/pull/10393.
 
+Likewise, the admission webhook's check for duplicate host and path definitions only keeps the generated configuration valid. It does not prevent one namespace from claiming a host used by another; use a policy engine such as OPA Gatekeeper or Kyverno to enforce host ownership.
+
 ## Multiple controller in one cluster
 
 Question - How can I easily install multiple instances of the ingress-nginx controller in the same cluster?

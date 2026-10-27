@@ -63,6 +63,9 @@ Because the ingress controller works using the [synchronization loop pattern](ht
 To prevent this situation to happen, the Ingress-Nginx Controller optionally exposes a [validating admission webhook server][8] to ensure the validity of incoming ingress objects.
 This webhook appends the incoming ingress objects to the list of ingresses, generates the configuration and calls nginx to ensure the configuration has no syntax errors.
 
+The webhook also rejects an Ingress that defines a host and path already served by another Ingress (regardless of `pathType`), unless exactly one of the two is a canary.
+This overlap check only keeps the generated configuration consistent; it is **not** a tenancy boundary. Users who can create Ingress objects can still affect other hosts served by the same controller, so enforce host ownership across namespaces with a policy engine (for example [OPA Gatekeeper](https://open-policy-agent.github.io/gatekeeper/) or [Kyverno](https://kyverno.io/)).
+
 [0]: https://github.com/openresty/lua-nginx-module/pull/1259
 [1]: https://coreos.com/kubernetes/docs/latest/replication-controller.html#the-reconciliation-loop-in-detail
 [2]: https://godoc.org/k8s.io/client-go/informers#NewFilteredSharedInformerFactory

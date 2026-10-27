@@ -40,7 +40,6 @@ import (
 	ngx_config "k8s.io/ingress-nginx/internal/ingress/controller/config"
 	"k8s.io/ingress-nginx/internal/ingress/controller/ingressclass"
 	"k8s.io/ingress-nginx/internal/ingress/controller/store"
-	"k8s.io/ingress-nginx/internal/ingress/errors"
 	"k8s.io/ingress-nginx/internal/ingress/inspector"
 	"k8s.io/ingress-nginx/internal/ingress/metric/collectors"
 	"k8s.io/ingress-nginx/internal/k8s"
@@ -1788,14 +1787,25 @@ func externalNamePorts(name string, svc *apiv1.Service) *apiv1.ServicePort {
 	}
 }
 
+// checkOverlap rejects an Ingress that defines a host and path already served
+// by another Ingress. Every rule and path is checked, and paths are compared
+// regardless of pathType because Exact and Prefix locations for the same path
+// shadow each other in nginx. A duplicate is only allowed when exactly one of
+// the two Ingresses is a canary.
+//
+// This is a consistency check, not a tenancy boundary: host ownership across
+// namespaces must be enforced with a policy engine.
 func checkOverlap(ing *networking.Ingress, servers []*ingress.Server) error {
+	isCanary := isCanaryIngress(ing)
+
 	for _, rule := range ing.Spec.Rules {
 		if rule.HTTP == nil {
 			continue
 		}
 
-		if rule.Host == "" {
-			rule.Host = defServerName
+		host := rule.Host
+		if host == "" {
+			host = defServerName
 		}
 
 		for _, path := range rule.HTTP.Paths {
@@ -1805,48 +1815,48 @@ func checkOverlap(ing *networking.Ingress, servers []*ingress.Server) error {
 				continue
 			}
 
-			if path.Path == "" {
-				path.Path = rootLocation
+			ingPath := path.Path
+			if ingPath == "" {
+				ingPath = rootLocation
 			}
 
-			existingIngresses := ingressForHostPath(rule.Host, path.Path, servers)
-
-			// no previous ingress
-			if len(existingIngresses) == 0 {
-				continue
-			}
-
-			// same ingress
-			for _, existing := range existingIngresses {
+			for _, existing := range ingressForHostPath(host, ingPath, servers) {
 				if existing.ObjectMeta.Namespace == ing.ObjectMeta.Namespace && existing.ObjectMeta.Name == ing.ObjectMeta.Name {
-					return nil
+					continue
 				}
+
+				// a canary is merged into the primary location as an alternative backend
+				if isCanary != isCanaryIngress(existing) {
+					continue
+				}
+
+				return fmt.Errorf(`host "%s" and path "%s" is already defined in ingress %s/%s`, host, ingPath, existing.Namespace, existing.Name)
 			}
-
-			// path overlap. Check if one of the ingresses has a canary annotation
-			isCanaryEnabled, annotationErr := parser.GetBoolAnnotation("canary", ing, canary.CanaryAnnotations.Annotations)
-			for _, existing := range existingIngresses {
-				isExistingCanaryEnabled, existingAnnotationErr := parser.GetBoolAnnotation("canary", existing, canary.CanaryAnnotations.Annotations)
-
-				if isCanaryEnabled && isExistingCanaryEnabled {
-					return fmt.Errorf(`host "%s" and path "%s" is already defined in ingress %s/%s`, rule.Host, path.Path, existing.Namespace, existing.Name)
-				}
-
-				if annotationErr == errors.ErrMissingAnnotations && existingAnnotationErr == errors.ErrMissingAnnotations {
-					return fmt.Errorf(`host "%s" and path "%s" is already defined in ingress %s/%s`, rule.Host, path.Path, existing.Namespace, existing.Name)
-				}
-			}
-
-			// no overlap
-			return nil
 		}
 	}
 
 	return nil
 }
 
+func isCanaryIngress(ing *networking.Ingress) bool {
+	enabled, err := parser.GetBoolAnnotation("canary", ing, canary.CanaryAnnotations.Annotations)
+	return err == nil && enabled
+}
+
+// overlapPath returns the path an Ingress defined for a location, ignoring a
+// trailing slash, so Prefix locations normalized by updateServerLocations
+// still match Exact locations for the same path.
+func overlapPath(path string) string {
+	if path == rootLocation {
+		return path
+	}
+	return strings.TrimSuffix(path, "/")
+}
+
 func ingressForHostPath(hostname, path string, servers []*ingress.Server) []*networking.Ingress {
 	ingresses := make([]*networking.Ingress, 0)
+	seen := sets.New[string]()
+	want := overlapPath(path)
 
 	for _, server := range servers {
 		if hostname != server.Hostname {
@@ -1854,13 +1864,24 @@ func ingressForHostPath(hostname, path string, servers []*ingress.Server) []*net
 		}
 
 		for i, location := range server.Locations {
-			if location.Path != path {
+			if location.IsDefBackend || location.Ingress == nil {
 				continue
 			}
 
-			if location.IsDefBackend {
+			locPath := location.IngressPath
+			if locPath == "" {
+				locPath = location.Path
+			}
+
+			if overlapPath(locPath) != want {
 				continue
 			}
+
+			key := k8s.MetaNamespaceKey(&location.Ingress.Ingress)
+			if seen.Has(key) {
+				continue
+			}
+			seen.Insert(key)
 
 			ingresses = append(ingresses, &server.Locations[i].Ingress.Ingress)
 		}
