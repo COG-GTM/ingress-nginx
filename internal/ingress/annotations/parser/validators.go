@@ -17,6 +17,8 @@ limitations under the License.
 package parser
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -252,4 +254,19 @@ func CheckAnnotationRisk(annotations map[string]string, maxrisk AnnotationRisk, 
 		}
 	}
 	return err
+}
+
+// nginxIdentifierRegex matches strings that are safe to write unquoted as an
+// nginx location suffix or shared memory zone name.
+var nginxIdentifierRegex = regexp.MustCompile(`^[A-Za-z0-9._-]*$`)
+
+// SafeNGINXIdentifier returns s when it only contains characters in [A-Za-z0-9._-],
+// and otherwise a hex sha256 digest of s, so object metadata can never break out of
+// the nginx directive it is interpolated into.
+func SafeNGINXIdentifier(s string) string {
+	if nginxIdentifierRegex.MatchString(s) {
+		return s
+	}
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }

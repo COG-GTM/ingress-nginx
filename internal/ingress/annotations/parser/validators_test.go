@@ -18,6 +18,7 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	networking "k8s.io/api/networking/v1"
@@ -366,5 +367,25 @@ func TestCommonNameAnnotationValidator(t *testing.T) {
 				t.Errorf("CommonNameAnnotationValidator() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestSafeNGINXIdentifier(t *testing.T) {
+	tests := map[string]string{
+		"":                                     "",
+		"c89a5111-b2e9-4af8-be19-c2a4a924c256": "c89a5111-b2e9-4af8-be19-c2a4a924c256",
+		"default_my.ingress_c89a5111-b2e9":     "default_my.ingress_c89a5111-b2e9",
+	}
+	for in, want := range tests {
+		if got := SafeNGINXIdentifier(in); got != want {
+			t.Errorf("SafeNGINXIdentifier(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	for _, in := range []string{"x;\nreturn 200;", "a b", "a{", "a}", "a/b", "a\"b", "a$b", "a:b"} {
+		got := SafeNGINXIdentifier(in)
+		if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(got) {
+			t.Errorf("SafeNGINXIdentifier(%q) = %q, expected a sha256 hex digest", in, got)
+		}
 	}
 }
