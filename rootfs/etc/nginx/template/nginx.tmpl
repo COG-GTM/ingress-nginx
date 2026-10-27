@@ -394,6 +394,16 @@ http {
         {{ end }}
     }
 
+    {{ if $cfg.UseForwardedHeaders }}
+    # X-Forwarded-Host/Proto/Port are only honored from proxy-real-ip-cidr
+    geo $realip_remote_addr $forwarded_headers_trusted {
+        default          0;
+        {{ range $trusted_ip := $cfg.ProxyRealIPCIDR }}
+        {{ $trusted_ip }} 1;
+        {{ end }}
+    }
+    {{ end }}
+
     {{ if and $cfg.UseForwardedHeaders $cfg.ComputeFullForwardedFor }}
     # We can't use $proxy_add_x_forwarded_for because the realip module
     # replaces the remote_addr too soon

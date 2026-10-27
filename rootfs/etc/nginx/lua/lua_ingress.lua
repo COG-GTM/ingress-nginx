@@ -1,5 +1,6 @@
 local ngx_re_split = require("ngx.re").split
 local string_to_bool = require("util").string_to_bool
+local forwarded_headers = require("util.forwarded_headers")
 
 local certificate_configured_for_current_request =
   require("certificate").configured_for_current_request
@@ -88,16 +89,6 @@ local function redirect_host()
   return host_port[1];
 end
 
-local function parse_x_forwarded_host()
-  local hosts, err = ngx_re_split(ngx.var.http_x_forwarded_host, ",")
-  if err then
-    ngx.log(ngx.ERR, string_format("could not parse variable: %s", err))
-    return ""
-  end
-
-  return hosts[1]
-end
-
 function _M.init_worker()
   randomseed()
 end
@@ -123,19 +114,22 @@ function _M.rewrite()
 
   ngx.var.best_http_host = ngx.var.http_host or ngx.var.host
 
-  if config.use_forwarded_headers then
+  if config.use_forwarded_headers and forwarded_headers.trusted() then
     -- trust http_x_forwarded_proto headers correctly indicate ssl offloading
-    if ngx.var.http_x_forwarded_proto then
-      ngx.var.pass_access_scheme = ngx.var.http_x_forwarded_proto
+    local forwarded_proto = forwarded_headers.proto()
+    if forwarded_proto then
+      ngx.var.pass_access_scheme = forwarded_proto
     end
 
-    if ngx.var.http_x_forwarded_port then
-      ngx.var.pass_server_port = ngx.var.http_x_forwarded_port
+    local forwarded_port = forwarded_headers.port()
+    if forwarded_port then
+      ngx.var.pass_server_port = forwarded_port
     end
 
     -- Obtain best http host
-    if ngx.var.http_x_forwarded_host then
-      ngx.var.best_http_host = parse_x_forwarded_host()
+    local forwarded_host = forwarded_headers.host()
+    if forwarded_host then
+      ngx.var.best_http_host = forwarded_host
     end
   end
 

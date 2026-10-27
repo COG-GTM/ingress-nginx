@@ -555,7 +555,7 @@ Sets the bucket size for the [map variables hash tables](https://nginx.org/en/do
 
 ## proxy-real-ip-cidr
 
-If `use-forwarded-headers` or `use-proxy-protocol` is enabled, `proxy-real-ip-cidr` defines the default IP/network address of your external load balancer. Can be a comma-separated list of CIDR blocks.
+If `use-forwarded-headers` or `use-proxy-protocol` is enabled, `proxy-real-ip-cidr` defines the default IP/network address of your external load balancer. Can be a comma-separated list of CIDR blocks. When `use-forwarded-headers` is enabled, `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Port` are only trusted from these addresses. Add IPv6 ranges (e.g. `::/0`) explicitly if your load balancer connects over IPv6.
 _**default:**_ "0.0.0.0/0"
 
 ## proxy-set-headers
@@ -900,6 +900,8 @@ Sets the addresses on which the server will accept requests instead of *. It sho
 ## use-forwarded-headers
 
 If true, NGINX passes the incoming `X-Forwarded-*` headers to upstreams. Use this option when NGINX is behind another L7 proxy / load balancer that is setting these headers.
+
+`X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Port` are only honored when the connection comes from an address in [proxy-real-ip-cidr](#proxy-real-ip-cidr); they set the `Host`, the forwarded scheme/port sent upstream and the target of HTTPS redirects. Set `proxy-real-ip-cidr` to the addresses of your load balancer, otherwise any client that can reach NGINX can choose these values. Values that are not a valid `host[:port]`, `http`/`https` or port number are ignored.
 
 If false, NGINX ignores incoming `X-Forwarded-*` headers, filling them with the request information it sees. Use this option if NGINX is exposed directly to the internet, or it's behind a L3/packet-based load balancer that doesn't alter the source IP in the packets.
 
