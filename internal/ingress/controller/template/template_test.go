@@ -746,6 +746,63 @@ func TestTemplateWithData(t *testing.T) {
 	}
 }
 
+func TestTemplateForwardedHeadersTrustedProxy(t *testing.T) {
+	ngxTpl, err := NewTemplate(nginx.TemplatePath)
+	if err != nil {
+		t.Fatalf("invalid NGINX template: %v", err)
+	}
+
+	geo := "geo $realip_remote_addr $forwarded_headers_trusted"
+
+	for _, tc := range []struct {
+		name                string
+		useForwardedHeaders bool
+		cidrs               []string
+		expected            []string
+	}{
+		{
+			name:                "use-forwarded-headers enabled",
+			useForwardedHeaders: true,
+			cidrs:               []string{"10.0.0.0/8", "2001:db8::/32"},
+			expected:            []string{geo, "default          0;", "10.0.0.0/8 1;", "2001:db8::/32 1;"},
+		},
+		{
+			name:                "use-forwarded-headers disabled",
+			useForwardedHeaders: false,
+			cidrs:               []string{"10.0.0.0/8"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.NewDefault()
+			cfg.UseForwardedHeaders = tc.useForwardedHeaders
+			cfg.ProxyRealIPCIDR = tc.cidrs
+			cfg.DefaultSSLCertificate = &ingress.SSLCert{}
+
+			rt, err := ngxTpl.Write(&config.TemplateConfig{
+				Cfg:         cfg,
+				ListenPorts: &config.ListenPorts{},
+			})
+			if err != nil {
+				t.Fatalf("invalid NGINX template: %v", err)
+			}
+
+			conf := string(rt)
+			if !tc.useForwardedHeaders {
+				if strings.Contains(conf, geo) {
+					t.Errorf("unexpected %q when use-forwarded-headers is disabled", geo)
+				}
+				return
+			}
+
+			for _, e := range tc.expected {
+				if !strings.Contains(conf, e) {
+					t.Errorf("expected %q in NGINX configuration", e)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkTemplateWithData(b *testing.B) {
 	pwd, err := os.Getwd()
 	if err != nil {

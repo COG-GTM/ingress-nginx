@@ -57,8 +57,8 @@ var _ = framework.DescribeSetting("use-forwarded-headers", func() {
 			GET("/").
 			WithHeader("Host", host).
 			WithHeader("X-Forwarded-Port", "1234").
-			WithHeader("X-Forwarded-Proto", "myproto").
-			WithHeader("X-Forwarded-Scheme", "myproto").
+			WithHeader("X-Forwarded-Proto", "https").
+			WithHeader("X-Forwarded-Scheme", "https").
 			WithHeader("X-Forwarded-For", "1.2.3.4").
 			WithHeader("X-Forwarded-Host", "myhost").
 			Expect().
@@ -68,8 +68,8 @@ var _ = framework.DescribeSetting("use-forwarded-headers", func() {
 
 		assert.Contains(ginkgo.GinkgoT(), body, "host=myhost")
 		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-host=myhost")
-		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-proto=myproto")
-		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-scheme=myproto")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-proto=https")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-scheme=https")
 		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-port=1234")
 		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-for=1.2.3.4")
 
@@ -78,7 +78,7 @@ var _ = framework.DescribeSetting("use-forwarded-headers", func() {
 			GET("/").
 			WithHeader("Host", host).
 			WithHeader("X-Forwarded-Port", "1234").
-			WithHeader("X-Forwarded-Proto", "myproto").
+			WithHeader("X-Forwarded-Proto", "https").
 			WithHeader("X-Forwarded-For", "1.2.3.4").
 			WithHeader("X-Forwarded-Host", "myhost.com, another.host,example.net").
 			Expect().
@@ -88,6 +88,57 @@ var _ = framework.DescribeSetting("use-forwarded-headers", func() {
 
 		assert.Contains(ginkgo.GinkgoT(), body, "host=myhost.com")
 		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-host=myhost.com")
+
+		ginkgo.By("ensuring that invalid X-Forwarded values are ignored")
+		body = f.HTTPTestClient().
+			GET("/").
+			WithHeader("Host", host).
+			WithHeader("X-Forwarded-Port", "99999").
+			WithHeader("X-Forwarded-Proto", "myproto").
+			WithHeader("X-Forwarded-Host", "evil.example/path").
+			Expect().
+			Status(http.StatusOK).
+			Body().
+			Raw()
+
+		assert.Contains(ginkgo.GinkgoT(), body, "host=forwarded-headers")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-port=80")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-proto=http")
+		assert.NotContains(ginkgo.GinkgoT(), body, "evil.example")
+	})
+
+	ginkgo.It("should not trust X-Forwarded headers from clients outside proxy-real-ip-cidr", func() {
+		host := forwardedHeadersHost
+
+		f.SetNginxConfigMapData(map[string]string{
+			setting:              "true",
+			"proxy-real-ip-cidr": "192.0.2.0/24",
+		})
+
+		f.EnsureIngress(framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, nil))
+
+		f.WaitForNginxConfiguration(
+			func(cfg string) bool {
+				return strings.Contains(cfg, "192.0.2.0/24 1;") &&
+					strings.Contains(cfg, "server_name forwarded-headers")
+			})
+
+		body := f.HTTPTestClient().
+			GET("/").
+			WithHeader("Host", host).
+			WithHeader("X-Forwarded-Port", "1234").
+			WithHeader("X-Forwarded-Proto", "https").
+			WithHeader("X-Forwarded-Host", "evil.example").
+			Expect().
+			Status(http.StatusOK).
+			Body().
+			Raw()
+
+		assert.Contains(ginkgo.GinkgoT(), body, "host=forwarded-headers")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-host=forwarded-headers")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-port=80")
+		assert.Contains(ginkgo.GinkgoT(), body, "x-forwarded-proto=http")
+		assert.NotContains(ginkgo.GinkgoT(), body, "evil.example")
 	})
 
 	ginkgo.It("should not trust X-Forwarded headers when setting is false", func() {

@@ -1,3 +1,5 @@
+local forwarded_headers = require("util.forwarded_headers")
+
 local request_uri = ngx.var.request_uri
 local redirect_to = ngx.arg[1]
 
@@ -11,13 +13,9 @@ end
 local redirectScheme = ngx.var.scheme
 local redirectPort = ngx.var.server_port
 
-if use_forwarded_headers then
-    if ngx.var.http_x_forwarded_proto then
-        redirectScheme = ngx.var.http_x_forwarded_proto
-    end
-    if ngx.var.http_x_forwarded_port then
-        redirectPort = ngx.var.http_x_forwarded_port
-    end
+if use_forwarded_headers and forwarded_headers.trusted() then
+    redirectScheme = forwarded_headers.proto() or redirectScheme
+    redirectPort = forwarded_headers.port() or redirectPort
 end
 
 return string.format("%s://%s:%s%s", redirectScheme,
