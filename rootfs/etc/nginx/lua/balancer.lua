@@ -2,6 +2,7 @@ local ngx_balancer = require("ngx.balancer")
 local cjson = require("cjson.safe")
 local util = require("util")
 local dns_lookup = require("util.dns").lookup
+local peer_util = require("util.peer")
 local configuration = require("configuration")
 local round_robin = require("balancer.round_robin")
 local chash = require("balancer.chash")
@@ -34,8 +35,10 @@ local IMPLEMENTATIONS = {
   ewma = ewma,
 }
 
-local PROHIBITED_LOCALHOST_PORT = configuration.prohibited_localhost_port or '10246'
-local PROHIBITED_PEER_PATTERN = "^127.*:" .. PROHIBITED_LOCALHOST_PORT .. "$"
+local INTERNAL_PORTS = {
+  [tostring(configuration.prohibited_localhost_port or "10246")] = true,
+  [tostring(configuration.prohibited_stream_port or "10247")] = true,
+}
 
 local _M = {}
 local balancers = {}
@@ -81,7 +84,10 @@ local function resolve_external_names(original_backend)
       table.insert(endpoints, { address = ip, port = endpoint.port })
     end
   end
-  backend.endpoints = endpoints
+  backend.endpoints = peer_util.filter_external_endpoints(endpoints, function(endpoint, kind)
+    ngx.log(ngx.ERR, "refusing ", kind, " address ", endpoint.address,
+            " resolved for ExternalName backend ", backend.name)
+  end)
   return backend
 end
 
@@ -111,6 +117,10 @@ local function sync_backend(backend)
 
   if is_backend_with_external_name(backend) then
     backend = resolve_external_names(backend)
+    if #backend.endpoints == 0 then
+      balancers[backend.name] = nil
+      return
+    end
   end
 
   backend.endpoints = format_ipv6_endpoints(backend.endpoints)
@@ -336,8 +346,10 @@ function _M.balance()
     return
   end
 
-  if peer:match(PROHIBITED_PEER_PATTERN) then
-    ngx.log(ngx.ERR, "attempted to proxy to self, balancer: ", balancer.name, ", peer: ", peer)
+  local forbidden = peer_util.forbidden_reason(peer, INTERNAL_PORTS)
+  if forbidden then
+    ngx.log(ngx.ERR, "attempted to proxy to self, balancer: ", balancer.name,
+            ", peer: ", peer, " (", forbidden, ")")
     return
   end
 

@@ -21,6 +21,7 @@ else
     error("required status port not found")
   end
   tcp_udp_configuration.prohibited_localhost_port = configfile.listen_ports.status_port
+  tcp_udp_configuration.prohibited_stream_port = configfile.listen_ports.stream_port
 end
 ok, res = pcall(require, "tcp_udp_balancer")
 if not ok then

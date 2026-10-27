@@ -53,8 +53,7 @@ func getEndpointsFromSlices(s *corev1.Service, port *corev1.ServicePort, proto c
 
 	// ExternalName services
 	if s.Spec.Type == corev1.ServiceTypeExternalName {
-		if ip := net.ParseIP(s.Spec.ExternalName); s.Spec.ExternalName == "localhost" ||
-			(ip != nil && ip.IsLoopback()) {
+		if isLocalExternalName(s.Spec.ExternalName) {
 			klog.Errorf("Invalid attempt to use localhost name %s in %q", s.Spec.ExternalName, svcKey)
 			return upsServers
 		}
@@ -165,4 +164,31 @@ func getEndpointsFromSlices(s *corev1.Service, port *corev1.ServicePort, proto c
 
 	klog.V(3).Infof("Endpoints found for Service %q: %v", svcKey, upsServers)
 	return upsServers
+}
+
+// isLocalExternalName reports whether an ExternalName points back at the
+// controller host: localhost names and loopback, unspecified (0.0.0.0/8, ::),
+// link-local or IPv4-in-IPv6 forms of those addresses.
+func isLocalExternalName(externalName string) bool {
+	name := strings.ToLower(strings.TrimSuffix(externalName, "."))
+	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(name)
+	if ip == nil {
+		return false
+	}
+
+	if ip.To4() == nil && net.IP(ip[:12]).Equal(net.IPv6zero[:12]) {
+		// IPv4-compatible IPv6 address (::a.b.c.d)
+		ip = ip[12:]
+	}
+
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 0 {
+		return true
+	}
+
+	return ip.IsLoopback() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast()
 }

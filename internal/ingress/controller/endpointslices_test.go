@@ -137,6 +137,31 @@ func TestGetEndpointsFromSlices(t *testing.T) {
 			[]ingress.Endpoint{},
 		},
 		{
+			"a service type ServiceTypeExternalName service with 0.0.0.0 in name should return 0 endpoint",
+			&corev1.Service{
+				Spec: corev1.ServiceSpec{
+					Type:         corev1.ServiceTypeExternalName,
+					ExternalName: "0.0.0.0",
+					Ports: []corev1.ServicePort{
+						{
+							Name:       "default",
+							TargetPort: intstr.FromInt(10246),
+						},
+					},
+				},
+			},
+			&corev1.ServicePort{
+				Name:       "default",
+				TargetPort: intstr.FromInt(10246),
+			},
+			corev1.ProtocolTCP,
+			"",
+			func(string) ([]*discoveryv1.EndpointSlice, error) {
+				return []*discoveryv1.EndpointSlice{}, nil
+			},
+			[]ingress.Endpoint{},
+		},
+		{
 			"a service type ServiceTypeExternalName with a valid port should return one endpoint",
 			&corev1.Service{
 				Spec: corev1.ServiceSpec{
@@ -925,5 +950,28 @@ func TestGetEndpointsFromSlices(t *testing.T) {
 				t.Errorf("Expected %d Endpoints but got %d", len(testCase.result), len(result))
 			}
 		})
+	}
+}
+
+func TestIsLocalExternalName(t *testing.T) {
+	local := []string{
+		"localhost", "localhost.", "LOCALHOST", "foo.localhost", "foo.localhost.",
+		"127.0.0.1", "127.1.2.3", "0.0.0.0", "0.1.2.3", "169.254.169.254",
+		"::1", "::", "::ffff:127.0.0.1", "::ffff:0.0.0.0", "::127.0.0.1", "fe80::1", "ff01::1", "ff02::1",
+	}
+	for _, name := range local {
+		if !isLocalExternalName(name) {
+			t.Errorf("expected %q to be rejected", name)
+		}
+	}
+
+	remote := []string{
+		"www.google.com", "www.google.com.", "localhost.example.com", "mylocalhost",
+		"10.0.0.1", "1.2.3.4", "2001:db8::1", "::ffff:10.0.0.1",
+	}
+	for _, name := range remote {
+		if isLocalExternalName(name) {
+			t.Errorf("expected %q to be allowed", name)
+		}
 	}
 }
