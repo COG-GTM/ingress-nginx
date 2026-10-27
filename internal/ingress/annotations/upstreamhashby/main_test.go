@@ -74,3 +74,65 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSubsetSize(t *testing.T) {
+	annotation := parser.GetAnnotationWithPrefix(upstreamHashBySubsetSize)
+	ap := NewParser(&resolver.Mock{})
+
+	testCases := []struct {
+		value     string
+		expected  int
+		expectErr bool
+	}{
+		{"0", 3, false},
+		{"1", 1, false},
+		{"3", 3, false},
+		{"1024", 1024, false},
+		{"1025", 0, true},
+		{"1000000000", 0, true},
+		{"9223372036854775807", 0, true},
+		{"-1", 0, true},
+		{"abc", 0, true},
+	}
+
+	ing := &networking.Ingress{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      "foo",
+			Namespace: api.NamespaceDefault,
+		},
+		Spec: networking.IngressSpec{},
+	}
+
+	for _, testCase := range testCases {
+		ing.SetAnnotations(map[string]string{
+			parser.GetAnnotationWithPrefix(upstreamHashByAnnotation):       "$request_uri",
+			parser.GetAnnotationWithPrefix(upstreamHashBySubsetAnnotation): "true",
+			annotation: testCase.value,
+		})
+		result, err := ap.Parse(ing)
+		if (err != nil) != testCase.expectErr {
+			t.Fatalf("value %q: expected error: %t got error: %v", testCase.value, testCase.expectErr, err)
+		}
+		if testCase.expectErr {
+			continue
+		}
+		if got := result.(*Config).UpstreamHashBySubsetSize; got != testCase.expected {
+			t.Errorf("value %q: expected subset size %d, got %d", testCase.value, testCase.expected, got)
+		}
+	}
+}
+
+func TestParseSubsetSizeWithoutAnnotationValidation(t *testing.T) {
+	parser.EnableAnnotationValidation = false
+	defer func() { parser.EnableAnnotationValidation = true }()
+
+	ing := &networking.Ingress{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "foo", Namespace: api.NamespaceDefault},
+	}
+	ing.SetAnnotations(map[string]string{
+		parser.GetAnnotationWithPrefix(upstreamHashBySubsetSize): "1000000000",
+	})
+	if _, err := NewParser(&resolver.Mock{}).Parse(ing); err == nil {
+		t.Fatalf("expected an error for an oversized subset size with annotation validation disabled")
+	}
+}

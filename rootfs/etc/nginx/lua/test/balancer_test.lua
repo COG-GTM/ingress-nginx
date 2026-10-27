@@ -495,6 +495,33 @@ describe("Balancer", function()
       assert.has_no.errors(function() balancer.sync_backend(backend) end)
       assert.stub(mock_instance.sync).was_called_with(mock_instance, backend)
     end)
+
+    it("logs and does not raise when the balancer implementation fails to build", function()
+      local original_new = implementation.new
+      implementation.new = function() error("table overflow") end
+      local s_ngx_log = spy.on(ngx, "log")
+
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      assert.spy(s_ngx_log).was_called_with(ngx.ERR, "failed to create balancer for backend ",
+        backend.name, ": ", match.has_match("table overflow"))
+
+      implementation.new = original_new
+    end)
+
+    it("logs and does not raise when an existing balancer fails to sync", function()
+      local original_new = implementation.new
+      local mock_instance = { sync = function() error("sync failed") end }
+      setmetatable(mock_instance, implementation)
+      implementation.new = function() return mock_instance end
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      local s_ngx_log = spy.on(ngx, "log")
+
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      assert.spy(s_ngx_log).was_called_with(ngx.ERR, "failed to sync balancer for backend ",
+        backend.name, ": ", match.has_match("sync failed"))
+
+      implementation.new = original_new
+    end)
   end)
 
   describe("sync_backends()", function()

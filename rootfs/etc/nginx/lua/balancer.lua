@@ -13,6 +13,7 @@ local string = string
 local ipairs = ipairs
 local table = table
 local getmetatable = getmetatable
+local pcall = pcall
 local tostring = tostring
 local pairs = pairs
 local math = math
@@ -103,6 +104,17 @@ local function is_backend_with_external_name(backend)
   return serv_type == "ExternalName"
 end
 
+-- a failure while building one backend's balancer must not abort the sync
+-- of the remaining backends
+local function new_balancer(implementation, backend)
+  local ok, instance = pcall(implementation.new, implementation, backend)
+  if not ok then
+    ngx.log(ngx.ERR, "failed to create balancer for backend ", backend.name, ": ", instance)
+    return nil
+  end
+  return instance
+end
+
 local function sync_backend(backend)
   if not backend.endpoints or #backend.endpoints == 0 then
     balancers[backend.name] = nil
@@ -119,7 +131,7 @@ local function sync_backend(backend)
   local balancer = balancers[backend.name]
 
   if not balancer then
-    balancers[backend.name] = implementation:new(backend)
+    balancers[backend.name] = new_balancer(implementation, backend)
     return
   end
 
@@ -130,11 +142,14 @@ local function sync_backend(backend)
     ngx.log(ngx.INFO,
         string.format("LB algorithm changed from %s to %s, resetting the instance",
                       balancer.name, implementation.name))
-    balancers[backend.name] = implementation:new(backend)
+    balancers[backend.name] = new_balancer(implementation, backend)
     return
   end
 
-  balancer:sync(backend)
+  local ok, err = pcall(balancer.sync, balancer, backend)
+  if not ok then
+    ngx.log(ngx.ERR, "failed to sync balancer for backend ", backend.name, ": ", err)
+  end
 end
 
 local function sync_backends_with_external_name()
