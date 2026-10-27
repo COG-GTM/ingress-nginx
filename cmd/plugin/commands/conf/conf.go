@@ -72,9 +72,9 @@ func conf(flags *genericclioptions.ConfigFlags, host, podName, deployment, selec
 			return err
 		}
 
-		fmt.Println(strings.TrimRight(strings.Trim(block, " \n"), " \n\t"))
+		fmt.Println(util.EscapeTerminalMultiline(strings.TrimRight(strings.Trim(block, " \n"), " \n\t")))
 	} else {
-		fmt.Print(nginxConf)
+		fmt.Print(util.EscapeTerminalMultiline(nginxConf))
 	}
 
 	return nil

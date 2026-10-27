@@ -58,6 +58,6 @@ func general(flags *genericclioptions.ConfigFlags, podName, deployment, selector
 		return err
 	}
 
-	fmt.Print(out)
+	fmt.Print(util.EscapeTerminalMultiline(out))
 	return nil
 }

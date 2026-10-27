@@ -150,6 +150,7 @@ func checkObjectArray(allLints []lint, objects []kmeta.Object, opts lintOptions)
 		if opts.allNamespaces {
 			objName = obj.GetNamespace() + "/" + obj.GetName()
 		}
+		objName = util.EscapeTerminal(objName)
 
 		failedLints := make([]lint, 0)
 		for _, lint := range usedLints {
@@ -161,7 +162,7 @@ func checkObjectArray(allLints []lint, objects []kmeta.Object, opts lintOptions)
 		if len(failedLints) != 0 {
 			fmt.Printf("✗ %v\n", objName)
 			for _, lint := range failedLints {
-				fmt.Printf("  - %v\n", lint.Message())
+				fmt.Printf("  - %v\n", util.EscapeTerminalMultiline(lint.Message()))
 				if opts.verbose && lint.Version() != "" {
 					fmt.Printf("      Lint added for version %v\n", lint.Version())
 				}
