@@ -19,8 +19,11 @@ package store
 import (
 	"bytes"
 	"context"
-	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"sync"
@@ -37,7 +40,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	certutil "k8s.io/client-go/util/cert"
-	"k8s.io/client-go/util/keyutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"k8s.io/ingress-nginx/internal/ingress/annotations/parser"
@@ -1657,19 +1659,15 @@ func TestWriteSSLSessionTicketKey(t *testing.T) {
 func newTestCAPEM(t *testing.T, cn string) []byte {
 	t.Helper()
 
-	key, err := keyutil.MakeEllipticPrivateKeyPEM()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("unexpected error generating key: %v", err)
 	}
-	signer, err := keyutil.ParsePrivateKeyPEM(key)
-	if err != nil {
-		t.Fatalf("unexpected error parsing key: %v", err)
-	}
-	cert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: cn}, signer.(crypto.Signer))
+	cert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: cn}, key)
 	if err != nil {
 		t.Fatalf("unexpected error generating CA: %v", err)
 	}
-	return certutil.EncodeCertPEM(cert)
+	return pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: cert.Raw})
 }
 
 func TestGetPemCertificateCrossNamespaceSecretsDoNotShareFiles(t *testing.T) {
