@@ -6,7 +6,8 @@ local tonumber = tonumber
 local _M = {}
 
 -- hostname, IPv4 address or bracketed IPv6 address, optionally with a port
-local HOST_REGEX = [[^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,252}))(?::[0-9]{1,5})?\z]]
+local HOST_REGEX = [[^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,252}))]] ..
+  [[(?::[0-9]{1,5})?\z]]
 
 local function first_value(header)
   if not header then
