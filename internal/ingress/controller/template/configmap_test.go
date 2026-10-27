@@ -201,8 +201,10 @@ func TestGlobalExternalAuthMethodParsing(t *testing.T) {
 		method string
 		expect string
 	}{
-		"invalid method": {"FOO", ""},
-		"valid method":   {"POST", "POST"},
+		"invalid method":        {"FOO", ""},
+		"valid method":          {"POST", "POST"},
+		"method with injection": {"GET; return 200;", ""},
+		"method as substring":   {"XGETX", ""},
 	}
 
 	for n, tc := range testCases {

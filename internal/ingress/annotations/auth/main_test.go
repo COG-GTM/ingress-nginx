@@ -134,6 +134,34 @@ func TestIngressAuthBadAuthType(t *testing.T) {
 	}
 }
 
+func TestIngressAuthTypeInjection(t *testing.T) {
+	_, dir, _ := dummySecretContent(t)
+	defer os.RemoveAll(dir)
+
+	for _, tc := range []struct {
+		annotation string
+		value      string
+	}{
+		{authTypeAnnotation, "basic;return 200;"},
+		{authTypeAnnotation, "xdigest"},
+		{authSecretTypeAnnotation, "auth-file;return 200;"},
+		{authSecretTypeAnnotation, "xauth-map"},
+	} {
+		ing := buildIngress()
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = authType
+		data[parser.GetAnnotationWithPrefix(AuthSecretAnnotation)] = demoSecret
+		data[parser.GetAnnotationWithPrefix(tc.annotation)] = tc.value
+		ing.SetAnnotations(data)
+
+		expected := ing_errors.NewValidationError(parser.GetAnnotationWithPrefix(tc.annotation))
+		_, err := NewParser(dir, &mockSecret{}).Parse(ing)
+		if err == nil || err.Error() != expected.Error() {
+			t.Errorf("%s=%q: expected '%v' but got '%v'", tc.annotation, tc.value, expected, err)
+		}
+	}
+}
+
 func TestIngressInvalidRealm(t *testing.T) {
 	ing := buildIngress()
 

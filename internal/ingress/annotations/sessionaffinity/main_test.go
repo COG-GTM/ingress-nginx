@@ -134,3 +134,19 @@ func TestIngressAffinityCookieConfig(t *testing.T) {
 		t.Errorf("expected secure parameter set to true but returned %v", nginxAffinity.Cookie.Secure)
 	}
 }
+
+func TestAffinityCookieExpiresValidation(t *testing.T) {
+	valid := []string{"0", "1", "4500", "-1"}
+	for _, v := range valid {
+		if !affinityCookieExpiresRegex.MatchString(v) {
+			t.Errorf("expected %q to be valid", v)
+		}
+	}
+
+	invalid := []string{"", "01", "0; foo", "foo 1", "0\nfoo", "abc123", "1.5"}
+	for _, v := range invalid {
+		if affinityCookieExpiresRegex.MatchString(v) {
+			t.Errorf("expected %q to be invalid", v)
+		}
+	}
+}

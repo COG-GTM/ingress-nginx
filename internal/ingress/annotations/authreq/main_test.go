@@ -408,3 +408,48 @@ func TestProxySetHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestValidMethod(t *testing.T) {
+	valid := []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "CONNECT", "OPTIONS", "TRACE"}
+	for _, m := range valid {
+		if !ValidMethod(m) {
+			t.Errorf("expected %q to be a valid method", m)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"get",
+		"FOO",
+		"GETS",
+		"XGET",
+		"GET; return 200;",
+		"GET;\ncontent_by_lua_block { os.execute('id') }\nset $x",
+		"GET\n",
+		"POST POST",
+	}
+	for _, m := range invalid {
+		if ValidMethod(m) {
+			t.Errorf("expected %q to be an invalid method", m)
+		}
+	}
+}
+
+func TestAuthMethodInjection(t *testing.T) {
+	ing := buildIngress()
+
+	for _, method := range []string{
+		"GET; return 200;",
+		"GET;\ncontent_by_lua_block { os.execute('id') }\nset $x",
+		"XPOSTX",
+	} {
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix("auth-url")] = "http://auth.example.com/auth"
+		data[parser.GetAnnotationWithPrefix("auth-method")] = method
+		ing.SetAnnotations(data)
+
+		if _, err := NewParser(&resolver.Mock{}).Parse(ing); err == nil {
+			t.Errorf("expected auth-method %q to be rejected", method)
+		}
+	}
+}
