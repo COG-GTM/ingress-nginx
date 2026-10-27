@@ -247,10 +247,13 @@ func (e1 *Config) Equal(e2 *Config) bool {
 }
 
 var (
-	methodsRegex    = regexp.MustCompile("(GET|HEAD|POST|PUT|PATCH|DELETE|CONNECT|OPTIONS|TRACE)")
-	headerRegexp    = regexp.MustCompile(`^[a-zA-Z\d\-_]+$`)
-	statusCodeRegex = regexp.MustCompile(`^\d{3}$`)
-	durationRegex   = regexp.MustCompile(`^\d+(ms|s|m|h|d|w|M|y)$`) // see http://nginx.org/en/docs/syntax.html
+	methodsRegex = regexp.MustCompile("(GET|HEAD|POST|PUT|PATCH|DELETE|CONNECT|OPTIONS|TRACE)")
+	headerRegexp = regexp.MustCompile(`^[a-zA-Z\d\-_]+$`)
+	// headerValueRegexp excludes quotes, backslashes, semicolons, braces and
+	// control characters so a value can never terminate the quoted nginx string.
+	headerValueRegexp = regexp.MustCompile(`^[a-zA-Z\d\-_ :.,/?!()\[\]@<>=+*#$&|~^%]*$`)
+	statusCodeRegex   = regexp.MustCompile(`^\d{3}$`)
+	durationRegex     = regexp.MustCompile(`^\d+(ms|s|m|h|d|w|M|y)$`) // see http://nginx.org/en/docs/syntax.html
 )
 
 // ValidMethod checks is the provided string a valid HTTP method
@@ -261,6 +264,11 @@ func ValidMethod(method string) bool {
 // ValidHeader checks is the provided string satisfies the header's name regex
 func ValidHeader(header string) bool {
 	return headerRegexp.MatchString(header)
+}
+
+// ValidHeaderValue checks if the provided string is a safe proxy_set_header value
+func ValidHeaderValue(value string) bool {
+	return headerValueRegexp.MatchString(value)
 }
 
 // ValidCacheDuration checks if the provided string is a valid cache duration
@@ -457,9 +465,12 @@ func (a authReq) Parse(ing *networking.Ingress) (interface{}, error) {
 			return nil, ing_errors.NewLocationDenied(fmt.Sprintf("unable to find configMap %q", proxySetHeaderMap))
 		}
 
-		for header := range proxySetHeadersMapContents.Data {
+		for header, value := range proxySetHeadersMapContents.Data {
 			if !ValidHeader(header) {
 				return nil, ing_errors.NewLocationDenied("invalid proxy-set-headers in configmap")
+			}
+			if !ValidHeaderValue(value) {
+				return nil, ing_errors.NewLocationDenied(fmt.Sprintf("invalid value for header %q in proxy-set-headers configmap", header))
 			}
 		}
 

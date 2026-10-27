@@ -514,7 +514,7 @@ Additionally it is possible to set:
 * `nginx.ingress.kubernetes.io/auth-response-headers`:
   `<Response_Header_1, ..., Response_Header_n>` to specify headers to pass to backend once authentication request completes.
 * `nginx.ingress.kubernetes.io/auth-proxy-set-headers`:
-  `<ConfigMap>` the name of a ConfigMap that specifies headers to pass to the authentication service
+  `<ConfigMap>` the name of a ConfigMap that specifies headers to pass to the authentication service. Header names may only contain letters, digits, `-` and `_`; header values may contain nginx variables (e.g. `$remote_addr`) but must not contain quotes, backslashes, `;`, `{`, `}` or line breaks, otherwise the location is denied.
 * `nginx.ingress.kubernetes.io/auth-request-redirect`:
   `<Request_Redirect_URL>`  to specify the X-Auth-Request-Redirect header value.
 * `nginx.ingress.kubernetes.io/auth-cache-key`:
