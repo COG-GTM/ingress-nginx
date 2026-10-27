@@ -125,7 +125,10 @@ type Configuration struct {
 	ValidationWebhook         string
 	ValidationWebhookCertPath string
 	ValidationWebhookKeyPath  string
-	DisableFullValidationTest bool
+	// ValidationWebhookClientCAPath, when set, requires callers of the
+	// validating webhook to present a client certificate signed by this CA.
+	ValidationWebhookClientCAPath string
+	DisableFullValidationTest     bool
 
 	GlobalExternalAuth  *ngx_config.GlobalExternalAuth
 	MaxmindEditionFiles *[]string

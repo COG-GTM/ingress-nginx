@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	networking "k8s.io/api/networking/v1"
 	machineryvalidation "k8s.io/apimachinery/pkg/api/validation"
@@ -118,10 +119,18 @@ func ValidateRegex(regex *regexp.Regexp, removeSpace bool) AnnotationValidator {
 }
 
 // CommonNameAnnotationValidator checks whether the annotation value starts with
-// 'CN=' and is followed by a valid regex.
+// 'CN=' and is followed by a valid regex. The value is rendered unquoted into the
+// NGINX configuration, so characters that can terminate the directive or start a
+// new one (whitespace, quotes, ';', '{', '}' and '#') are rejected.
 func CommonNameAnnotationValidator(s string) error {
 	if !strings.HasPrefix(s, "CN=") {
 		return fmt.Errorf("value %s is not a valid Common Name annotation: missing prefix 'CN='", s)
+	}
+
+	if strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(`;{}#'"`, r)
+	}) {
+		return fmt.Errorf("value %q is not a valid Common Name annotation: contains forbidden characters", s)
 	}
 
 	if _, err := regexp.Compile(s[3:]); err != nil {

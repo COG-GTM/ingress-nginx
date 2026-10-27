@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -482,5 +483,107 @@ func TestTLSKeyReloader(t *testing.T) {
 			}
 		})
 		*/
+	})
+}
+
+func TestTLSListenerClientCA(t *testing.T) {
+	serverCert, certFile, keyFile := newFakeCertificate(t)
+	defer os.Remove(certFile)
+	defer os.Remove(keyFile)
+
+	clientCA, err := newCA("webhook-client-ca")
+	if err != nil {
+		t.Fatalf("unexpected error creating client CA: %v", err)
+	}
+	otherCA, err := newCA("other-ca")
+	if err != nil {
+		t.Fatalf("unexpected error creating other CA: %v", err)
+	}
+
+	caFile, err := os.CreateTemp("", "client-ca-")
+	if err != nil {
+		t.Fatalf("unexpected error creating CA file: %v", err)
+	}
+	defer os.Remove(caFile.Name())
+	if _, err := caFile.Write(encodeCertPEM(clientCA.Cert)); err != nil {
+		t.Fatalf("unexpected error writing CA file: %v", err)
+	}
+	caFile.Close()
+
+	listener := TLSListener{
+		certificatePath: certFile,
+		keyPath:         keyFile,
+		lock:            sync.Mutex{},
+	}
+	listener.load()
+
+	if err := listener.SetClientCA(filepath.Join(os.TempDir(), "does-not-exist")); err == nil {
+		t.Fatalf("expected error loading missing client CA file")
+	}
+	if err := listener.SetClientCA(caFile.Name()); err != nil {
+		t.Fatalf("unexpected error loading client CA: %v", err)
+	}
+
+	cfg := listener.TLSConfig()
+	if cfg.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("expected ClientAuth to be RequireAndVerifyClientCert, got %v", cfg.ClientAuth)
+	}
+
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	s.TLS = cfg
+	s.StartTLS()
+	defer s.Close()
+
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(serverCert)
+
+	clientCertFor := func(ca *keyPair) tls.Certificate {
+		key, err := newPrivateKey()
+		if err != nil {
+			t.Fatalf("unexpected error creating client key: %v", err)
+		}
+		cert, err := newSignedCert(&certutil.Config{
+			CommonName: "kube-apiserver",
+			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		}, key, ca.Cert, ca.Key)
+		if err != nil {
+			t.Fatalf("unexpected error creating client certificate: %v", err)
+		}
+		return tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key}
+	}
+
+	get := func(certs ...tls.Certificate) error {
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs:      roots,
+			Certificates: certs,
+			ServerName:   "localhost",
+			MinVersion:   tls.VersionTLS12,
+		}}}
+		resp, err := client.Get(s.URL)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		return nil
+	}
+
+	t.Run("without a client certificate", func(t *testing.T) {
+		if get() == nil {
+			t.Errorf("request without client certificate should fail")
+		}
+	})
+
+	t.Run("with a client certificate from an untrusted CA", func(t *testing.T) {
+		if get(clientCertFor(otherCA)) == nil {
+			t.Errorf("request with untrusted client certificate should fail")
+		}
+	})
+
+	t.Run("with a client certificate from the trusted CA", func(t *testing.T) {
+		if err := get(clientCertFor(clientCA)); err != nil {
+			t.Errorf("request with trusted client certificate should succeed, got: %v", err)
+		}
 	})
 }

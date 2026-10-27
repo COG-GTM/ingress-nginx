@@ -491,6 +491,7 @@ type TLSListener struct {
 	keyPath         string
 	certificate     *tls.Certificate
 	err             error
+	clientCAs       *x509.CertPool
 	lock            sync.Mutex
 }
 
@@ -523,12 +524,37 @@ func (tl *TLSListener) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, e
 	return tl.certificate, tl.err
 }
 
-// TLSConfig instantiates a TLS configuration, always providing an up to date certificate
+// SetClientCA configures the listener to require and verify client certificates
+// signed by one of the CA certificates in the PEM file at caPath.
+func (tl *TLSListener) SetClientCA(caPath string) error {
+	caBytes, err := os.ReadFile(caPath)
+	if err != nil {
+		return fmt.Errorf("reading client CA file %v: %w", caPath, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caBytes) {
+		return fmt.Errorf("no valid PEM certificates found in client CA file %v", caPath)
+	}
+	tl.lock.Lock()
+	defer tl.lock.Unlock()
+	tl.clientCAs = pool
+	return nil
+}
+
+// TLSConfig instantiates a TLS configuration, always providing an up to date certificate.
+// If a client CA was configured, clients must present a certificate signed by it.
 func (tl *TLSListener) TLSConfig() *tls.Config {
-	return &tls.Config{
+	cfg := &tls.Config{
 		GetCertificate: tl.GetCertificate,
 		MinVersion:     tls.VersionTLS12,
 	}
+	tl.lock.Lock()
+	defer tl.lock.Unlock()
+	if tl.clientCAs != nil {
+		cfg.ClientCAs = tl.clientCAs
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return cfg
 }
 
 func (tl *TLSListener) load() {

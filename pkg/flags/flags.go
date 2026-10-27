@@ -209,6 +209,9 @@ Takes the form "<host>:port". If not provided, no admission controller is starte
 			`The path of the validating webhook certificate PEM.`)
 		validationWebhookKey = flags.String("validating-webhook-key", "",
 			`The path of the validating webhook key PEM.`)
+		validationWebhookClientCA = flags.String("validating-webhook-client-ca", "",
+			`The path of a CA bundle PEM used to verify client certificates presented to the validating webhook.
+If provided, callers (normally the Kubernetes API server) must present a client certificate signed by this CA.`)
 		disableFullValidationTest = flags.Bool("disable-full-test", false,
 			`Disable full test of all merged ingresses at the admission stage and tests the template of the ingress being created or updated  (full test of all ingresses is enabled by default).`)
 
@@ -390,12 +393,13 @@ https://blog.maxmind.com/2019/12/significant-changes-to-accessing-and-using-geol
 			WatchWithoutClass:  *watchWithoutClass,
 			IngressClassByName: *ingressClassByName,
 		},
-		DisableCatchAll:           *disableCatchAll,
-		ValidationWebhook:         *validationWebhook,
-		ValidationWebhookCertPath: *validationWebhookCert,
-		ValidationWebhookKeyPath:  *validationWebhookKey,
-		InternalLoggerAddress:     *internalLoggerAddress,
-		DisableSyncEvents:         *disableSyncEvents,
+		DisableCatchAll:               *disableCatchAll,
+		ValidationWebhook:             *validationWebhook,
+		ValidationWebhookCertPath:     *validationWebhookCert,
+		ValidationWebhookKeyPath:      *validationWebhookKey,
+		ValidationWebhookClientCAPath: *validationWebhookClientCA,
+		InternalLoggerAddress:         *internalLoggerAddress,
+		DisableSyncEvents:             *disableSyncEvents,
 	}
 
 	if *apiserverHost != "" {
