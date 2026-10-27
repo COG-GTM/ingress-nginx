@@ -408,6 +408,12 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
 		return err
 	}
+
+	err = checkAliasOverlap(ing, parsed.Aliases, servers)
+	if err != nil {
+		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
+		return err
+	}
 	testedSize := len(ings)
 	if n.cfg.DisableFullValidationTest {
 		_, _, pcfg = n.getConfiguration(ings[len(ings)-1:])
@@ -1472,6 +1478,12 @@ func (n *NGINXController) createServers(data []*ingress.Ingress,
 		}
 	}
 
+	hostnames := make([]string, 0, len(servers))
+	for hostname := range servers {
+		hostnames = append(hostnames, hostname)
+	}
+	sort.Strings(hostnames)
+
 	for host, hostAliases := range allAliases {
 		if _, ok := servers[host]; !ok {
 			continue
@@ -1479,11 +1491,13 @@ func (n *NGINXController) createServers(data []*ingress.Ingress,
 
 		uniqAliases := sets.NewString()
 		for _, alias := range hostAliases {
-			if alias == host {
+			alias = normalizeServerName(alias)
+			if alias == "" || alias == host {
 				continue
 			}
 
-			if _, ok := servers[alias]; ok {
+			if conflict, ok := conflictingHost(alias, otherHostnames(hostnames, host)); ok {
+				klog.Warningf("Ignoring server-alias %q for server %q: it overlaps the hostname %q of another server", alias, host, conflict)
 				continue
 			}
 
@@ -1839,6 +1853,59 @@ func checkOverlap(ing *networking.Ingress, servers []*ingress.Server) error {
 
 			// no overlap
 			return nil
+		}
+	}
+
+	return nil
+}
+
+// otherHostnames returns hostnames without host and the catch-all server.
+func otherHostnames(hostnames []string, host string) []string {
+	others := make([]string, 0, len(hostnames))
+	for _, hostname := range hostnames {
+		if hostname == host || hostname == defServerName {
+			continue
+		}
+		others = append(others, hostname)
+	}
+	return others
+}
+
+// checkAliasOverlap rejects server-alias values that nginx would match for the hostname
+// of a server not defined by ing itself.
+func checkAliasOverlap(ing *networking.Ingress, aliases []string, servers []*ingress.Server) error {
+	if len(aliases) == 0 {
+		return nil
+	}
+
+	ownHosts := sets.NewString()
+	for _, rule := range ing.Spec.Rules {
+		host := rule.Host
+		if host == "" {
+			host = defServerName
+		}
+		ownHosts.Insert(host)
+	}
+
+	for _, alias := range aliases {
+		for _, server := range servers {
+			if ownHosts.Has(server.Hostname) || server.Hostname == defServerName {
+				continue
+			}
+
+			if !aliasConflictsWithHost(alias, server.Hostname) {
+				continue
+			}
+
+			owner := "another ingress"
+			for _, location := range server.Locations {
+				if location.Ingress != nil {
+					owner = fmt.Sprintf("ingress %s/%s", location.Ingress.Namespace, location.Ingress.Name)
+					break
+				}
+			}
+
+			return fmt.Errorf(`server-alias "%s" overlaps host "%s" already defined in %s`, alias, server.Hostname, owner)
 		}
 	}
 

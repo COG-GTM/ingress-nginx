@@ -45,6 +45,8 @@ func TestParse(t *testing.T) {
 		{map[string]string{annotation: "www.example.com"}, []string{"www.example.com"}, false, false},
 		{map[string]string{annotation: "*.example.com,www.example.*"}, []string{"*.example.com", "www.example.*"}, false, false},
 		{map[string]string{annotation: `~^www\d+\.example\.com$`}, []string{`~^www\d+\.example\.com$`}, false, false},
+		{map[string]string{annotation: "App.Example.com, app.example.com., *.Example.COM"}, []string{"*.example.com", "app.example.com"}, false, false},
+		{map[string]string{annotation: `~^WWW\d+\.example\.com$`}, []string{`~^WWW\d+\.example\.com$`}, false, false},
 		{map[string]string{annotation: `www.xpto;lala`}, []string{}, false, true},
 		{map[string]string{annotation: `www.xpto;lala`}, []string{"www.xpto;lala"}, true, false}, // When we skip validation no error should happen
 		{map[string]string{annotation: ""}, []string{}, false, true},
