@@ -746,6 +746,44 @@ func TestTemplateWithData(t *testing.T) {
 	}
 }
 
+func TestTemplateQuotesAuthTLSMatchCN(t *testing.T) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(path.Join(pwd, "../../../../test/data/config.json"))
+	if err != nil {
+		t.Fatalf("unexpected error reading json file: %v", err)
+	}
+	var dat config.TemplateConfig
+	if err := jsoniter.ConfigCompatibleWithStandardLibrary.Unmarshal(data, &dat); err != nil {
+		t.Fatalf("unexpected error unmarshalling json: %v", err)
+	}
+	if dat.ListenPorts == nil {
+		dat.ListenPorts = &config.ListenPorts{}
+	}
+	if len(dat.Servers) == 0 {
+		t.Fatalf("expected at least one server in test data")
+	}
+	dat.Cfg.DefaultSSLCertificate = &ingress.SSLCert{}
+	dat.Servers[0].CertificateAuth.MatchCN = `CN=(my\.app|other\.app)$`
+
+	ngxTpl, err := NewTemplate(nginx.TemplatePath)
+	if err != nil {
+		t.Fatalf("invalid NGINX template: %v", err)
+	}
+
+	rt, err := ngxTpl.Write(&dat)
+	if err != nil {
+		t.Fatalf("invalid NGINX template: %v", err)
+	}
+
+	expected := `if ( $ssl_client_s_dn !~ "CN=(my\\.app|other\\.app)$" ) {`
+	if !strings.Contains(string(rt), expected) {
+		t.Errorf("expected auth-tls-match-cn to be rendered as a quoted string %q", expected)
+	}
+}
+
 func BenchmarkTemplateWithData(b *testing.B) {
 	pwd, err := os.Getwd()
 	if err != nil {

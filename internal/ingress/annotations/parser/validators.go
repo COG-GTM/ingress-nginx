@@ -117,11 +117,21 @@ func ValidateRegex(regex *regexp.Regexp, removeSpace bool) AnnotationValidator {
 	}
 }
 
+// commonNameRegexChars limits auth-tls-match-cn to regex syntax that cannot
+// terminate or extend the NGINX directive it is rendered into: no whitespace,
+// quotes, '#', ';', '{' or '}'.
+var commonNameRegexChars = regexp.MustCompile(`^CN=[A-Za-z0-9_.*+?()\[\]|^$\\/,=:@~-]+$`)
+
 // CommonNameAnnotationValidator checks whether the annotation value starts with
-// 'CN=' and is followed by a valid regex.
+// 'CN=' and is followed by a valid regex made of characters that are safe to
+// render into nginx.conf.
 func CommonNameAnnotationValidator(s string) error {
 	if !strings.HasPrefix(s, "CN=") {
 		return fmt.Errorf("value %s is not a valid Common Name annotation: missing prefix 'CN='", s)
+	}
+
+	if !commonNameRegexChars.MatchString(s) {
+		return fmt.Errorf("value %q is not a valid Common Name annotation: only letters, digits and the regex characters _.*+?()[]|^$\\/,=:@~- are allowed", s)
 	}
 
 	if _, err := regexp.Compile(s[3:]); err != nil {

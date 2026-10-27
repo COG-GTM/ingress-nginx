@@ -314,6 +314,11 @@ var _ = framework.DescribeAnnotation("auth-tls-*", func() {
 
 		assertSslClientCertificateConfig(f, host, "on", "1")
 
+		f.WaitForNginxServer(host,
+			func(server string) bool {
+				return strings.Contains(server, `if ( $ssl_client_s_dn !~ "CN=authtls" ) {`)
+			})
+
 		f.HTTPTestClientWithTLSConfig(clientConfig).
 			GET("/").
 			WithURL(f.GetURL(framework.HTTPS)).
