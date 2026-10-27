@@ -397,7 +397,7 @@ var _ = framework.DescribeAnnotation("auth-tls-*", func() {
 
 //nolint:unparam // Ignore the invariant param: host
 func assertSslClientCertificateConfig(f *framework.Framework, host, verifyClient, verifyDepth string) {
-	sslClientCertDirective := fmt.Sprintf("ssl_client_certificate /etc/ingress-controller/ssl/%s-%s.pem;", f.Namespace, host)
+	sslClientCertDirective := fmt.Sprintf("ssl_client_certificate /etc/ingress-controller/ssl/%s_%s.pem;", f.Namespace, host)
 	sslVerify := fmt.Sprintf("ssl_verify_client %s;", verifyClient)
 	sslVerifyDepth := fmt.Sprintf("ssl_verify_depth %s;", verifyDepth)
 
