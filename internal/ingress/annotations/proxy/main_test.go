@@ -286,3 +286,46 @@ func TestProxyWithNoAnnotation(t *testing.T) {
 		t.Errorf("expected 1024m as proxy-max-temp-file-size but returned %v", p.ProxyMaxTempFileSize)
 	}
 }
+
+func TestProxyRejectsValuesThatBreakDirectives(t *testing.T) {
+	tests := []struct {
+		annotation string
+		value      string
+		field      func(*Config) string
+		expected   string
+	}{
+		{"proxy-cookie-path", "/a /b /c", func(c *Config) string { return c.CookiePath }, ""},
+		{"proxy-cookie-path", "/a/b", func(c *Config) string { return c.CookiePath }, ""},
+		{"proxy-cookie-path", "/one/ /", func(c *Config) string { return c.CookiePath }, "/one/ /"},
+		{"proxy-cookie-domain", "a.com b.com c.com", func(c *Config) string { return c.CookieDomain }, ""},
+		{"proxy-cookie-domain", "localhost example.org", func(c *Config) string { return c.CookieDomain }, "localhost example.org"},
+		{"proxy-redirect-from", "http://a http://b", func(c *Config) string { return c.ProxyRedirectFrom }, ""},
+		{"proxy-redirect-to", "/x /y", func(c *Config) string { return c.ProxyRedirectTo }, ""},
+		{"proxy-redirect-from", " http://a ", func(c *Config) string { return c.ProxyRedirectFrom }, "http://a"},
+		{"proxy-buffer-size", "8b", func(c *Config) string { return c.BufferSize }, "10k"},
+		{"proxy-buffer-size", "1g", func(c *Config) string { return c.BufferSize }, "10k"},
+		{"proxy-buffer-size", "16k", func(c *Config) string { return c.BufferSize }, "16k"},
+		{"proxy-body-size", "8 m", func(c *Config) string { return c.BodySize }, "3k"},
+		{"proxy-body-size", "1g", func(c *Config) string { return c.BodySize }, "1g"},
+		{"proxy-max-temp-file-size", "1b", func(c *Config) string { return c.ProxyMaxTempFileSize }, "1024m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.annotation+"="+tt.value, func(t *testing.T) {
+			ing := buildIngress()
+			ing.SetAnnotations(map[string]string{parser.GetAnnotationWithPrefix(tt.annotation): tt.value})
+
+			i, err := NewParser(mockBackend{}).Parse(ing)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			cfg, ok := i.(*Config)
+			if !ok {
+				t.Fatalf("expected a Config type")
+			}
+			if got := tt.field(cfg); got != tt.expected {
+				t.Errorf("expected %q but got %q", tt.expected, got)
+			}
+		})
+	}
+}

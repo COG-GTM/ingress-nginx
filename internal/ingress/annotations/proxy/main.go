@@ -83,19 +83,19 @@ var proxyAnnotations = parser.Annotation{
 			By default proxy buffer size is set as "4k".`,
 		},
 		proxyCookiePathAnnotation: {
-			Validator:     parser.ValidateRegex(parser.URLIsValidRegex, true),
+			Validator:     parser.ValidateOffOrPair(parser.URLIsValidRegex),
 			Scope:         parser.AnnotationScopeLocation,
 			Risk:          parser.AnnotationRiskMedium,
 			Documentation: `This annotation sets a text that should be changed in the path attribute of the "Set-Cookie" header fields of a proxied server response.`,
 		},
 		proxyCookieDomainAnnotation: {
-			Validator:     parser.ValidateRegex(parser.BasicCharsRegex, true),
+			Validator:     parser.ValidateOffOrPair(parser.BasicCharsRegex),
 			Scope:         parser.AnnotationScopeLocation,
 			Risk:          parser.AnnotationRiskMedium,
 			Documentation: `This annotation ets a text that should be changed in the domain attribute of the "Set-Cookie" header fields of a proxied server response.`,
 		},
 		proxyBodySizeAnnotation: {
-			Validator:     parser.ValidateRegex(parser.SizeRegex, true),
+			Validator:     parser.ValidateRegex(parser.OffsetRegex, true),
 			Scope:         parser.AnnotationScopeLocation,
 			Risk:          parser.AnnotationRiskMedium,
 			Documentation: `This annotation allows setting the maximum allowed size of a client request body.`,
@@ -151,7 +151,7 @@ var proxyAnnotations = parser.Annotation{
 			Documentation: `This annotations sets the HTTP protocol version for proxying. Can be "1.0" or "1.1".`,
 		},
 		proxyMaxTempFileSizeAnnotation: {
-			Validator:     parser.ValidateRegex(parser.SizeRegex, true),
+			Validator:     parser.ValidateRegex(parser.OffsetRegex, true),
 			Scope:         parser.AnnotationScopeLocation,
 			Risk:          parser.AnnotationRiskLow,
 			Documentation: `This annotation defines the maximum size of a temporary file when buffering responses.`,

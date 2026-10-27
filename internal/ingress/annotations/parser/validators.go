@@ -53,8 +53,13 @@ var (
 //nolint:goconst //already a constant
 var IsValidRegex = regexp.MustCompile("^[/" + alphaNumericChars + regexEnabledChars + "]*$")
 
-// SizeRegex validates sizes understood by NGINX, like 1000, 100k, 1000M
-var SizeRegex = regexp.MustCompile(`^(?i)\d+[bkmg]?$`)
+// SizeRegex validates sizes understood by NGINX "size" directives (like proxy_buffer_size),
+// like 1000, 100k, 1000M
+var SizeRegex = regexp.MustCompile(`^\d+[kKmM]?$`)
+
+// OffsetRegex validates sizes understood by NGINX "offset" directives (like client_max_body_size),
+// like 1000, 100k, 1000M, 1g
+var OffsetRegex = regexp.MustCompile(`^\d+[kKmMgG]?$`)
 
 // URLRegex is used to validate a URL but with only a specific set of characters:
 // It is alphanumericChar + ":", "?", "&"
@@ -104,14 +109,38 @@ func ValidateServerName(value string) error {
 
 // ValidateRegex receives a regex as an argument and uses it to validate
 // the value of the field.
-// Annotation can define if the spaces should be trimmed before validating the value
-func ValidateRegex(regex *regexp.Regexp, removeSpace bool) AnnotationValidator {
+// Annotation can define if leading and trailing spaces should be trimmed before validating
+// the value. The trimming is the same one applied when the value is read by the parser,
+// so the validated value is always the value that is used.
+func ValidateRegex(regex *regexp.Regexp, trimSpace bool) AnnotationValidator {
 	return func(s string) error {
-		if removeSpace {
-			s = strings.ReplaceAll(s, " ", "")
+		if trimSpace {
+			s = normalizeString(s)
 		}
 		if !regex.MatchString(s) {
 			return fmt.Errorf("value %s is invalid", s)
+		}
+		return nil
+	}
+}
+
+// ValidateOffOrPair validates the value of annotations rendered as the arguments of NGINX
+// directives that accept either "off" or exactly two arguments, like proxy_cookie_path
+// and proxy_cookie_domain. Each argument must match the regex.
+func ValidateOffOrPair(regex *regexp.Regexp) AnnotationValidator {
+	return func(s string) error {
+		s = normalizeString(s)
+		if s == "off" {
+			return nil
+		}
+		args := strings.Fields(s)
+		if len(args) != 2 || strings.ContainsAny(s, "\t\n\r\v\f") {
+			return fmt.Errorf("value %s is invalid: expected \"off\" or two space separated arguments", s)
+		}
+		for _, arg := range args {
+			if !regex.MatchString(arg) {
+				return fmt.Errorf("value %s is invalid", s)
+			}
 		}
 		return nil
 	}
