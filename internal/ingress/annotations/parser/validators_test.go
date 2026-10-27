@@ -359,6 +359,71 @@ func TestCommonNameAnnotationValidator(t *testing.T) {
 			annotation: `CN=(api-one\.(asdf)?qwer\.webpage\.organization\.org)`,
 			wantErr:    false,
 		},
+		{
+			name:       "anchored regex with character class",
+			annotation: `CN=^client-[0-9]+\.example\.com$`,
+			wantErr:    false,
+		},
+		{
+			name:       "nginx config injection payload from CVE-2025-1097 report",
+			annotation: "CN=x #(\n) {}\nlocation = /pwn { content_by_lua_block { os.execute(\"id\") } }\nif ($x ~ x",
+			wantErr:    true,
+		},
+		{
+			name:       "nginx config injection that compiles as a Go regex",
+			annotation: "CN=x #(\n) {}\nlocation = /pwn { return 200 \"[pwned\"; }\nif ($host ~ x]",
+			wantErr:    true,
+		},
+		{
+			name:       "newline",
+			annotation: "CN=a\nb",
+			wantErr:    true,
+		},
+		{
+			name:       "carriage return",
+			annotation: "CN=a\rb",
+			wantErr:    true,
+		},
+		{
+			name:       "space",
+			annotation: "CN=a b",
+			wantErr:    true,
+		},
+		{
+			name:       "tab",
+			annotation: "CN=a\tb",
+			wantErr:    true,
+		},
+		{
+			name:       "hash comment",
+			annotation: "CN=a#b",
+			wantErr:    true,
+		},
+		{
+			name:       "semicolon",
+			annotation: "CN=a;b",
+			wantErr:    true,
+		},
+		{
+			name:       "braces",
+			annotation: "CN=a{1,2}",
+			wantErr:    true,
+		},
+		{
+			name:       "double quote",
+			annotation: `CN=a"b`,
+			wantErr:    true,
+		},
+		{
+			name:       "single quote",
+			annotation: `CN=a'b`,
+			wantErr:    true,
+		},
+		{
+			name:       "empty regex",
+			annotation: "CN=",
+			wantErr:    true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
