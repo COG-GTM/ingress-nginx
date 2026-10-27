@@ -1008,7 +1008,7 @@ stream {
             proxy_set_header            X-Request-ID            $req_id;
 
             {{ if $externalAuth.Method }}
-            proxy_method                {{ $externalAuth.Method }};
+            proxy_method                {{ $externalAuth.Method | quote }};
             proxy_set_header            X-Original-URI          $request_uri;
             proxy_set_header            X-Scheme                $pass_access_scheme;
             {{ end }}

@@ -151,7 +151,7 @@ var sessionAffinityAnnotations = parser.Annotation{
 	},
 }
 
-var affinityCookieExpiresRegex = regexp.MustCompile(`(^0|-?[1-9]\d*$)`)
+var affinityCookieExpiresRegex = regexp.MustCompile(`^(0|-?[1-9]\d*)$`)
 
 // Config describes the per ingress session affinity config
 type Config struct {

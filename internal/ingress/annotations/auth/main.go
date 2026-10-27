@@ -41,8 +41,8 @@ const (
 )
 
 var (
-	authTypeRegex       = regexp.MustCompile(`basic|digest`)
-	authSecretTypeRegex = regexp.MustCompile(`auth-file|auth-map`)
+	authTypeRegex       = regexp.MustCompile(`^(basic|digest)$`)
+	authSecretTypeRegex = regexp.MustCompile(`^(auth-file|auth-map)$`)
 
 	// AuthDirectory default directory used to store files
 	// to authenticate request
