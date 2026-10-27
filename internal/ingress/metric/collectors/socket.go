@@ -60,6 +60,36 @@ type HistogramBuckets struct {
 
 type metricMapping map[string]prometheus.Collector
 
+// otherMethod is the label value used for any HTTP method that is not in knownMethods.
+const otherMethod = "OTHER"
+
+// knownMethods bounds the cardinality of the client-controlled "method" label
+// (RFC 9110, PATCH and the WebDAV methods from RFC 4918).
+var knownMethods = sets.New[string](
+	"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH",
+	"PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+)
+
+func normalizeMethod(method string) string {
+	if knownMethods.Has(method) {
+		return method
+	}
+	return otherMethod
+}
+
+// normalizeStatus only allows three digit status codes so the "status" label stays bounded.
+func normalizeStatus(status string) string {
+	if len(status) != 3 {
+		return "-"
+	}
+	for i := 0; i < len(status); i++ {
+		if status[i] < '0' || status[i] > '9' {
+			return "-"
+		}
+	}
+	return status
+}
+
 // SocketCollector stores prometheus metrics and ingress meta-data
 type SocketCollector struct {
 	prometheus.Collector
@@ -313,7 +343,10 @@ func (sc *SocketCollector) handleMessage(msg []byte) {
 			continue
 		}
 
-		if sc.reportStatusClasses && stats.Status != "" {
+		stats.Method = normalizeMethod(stats.Method)
+		stats.Status = normalizeStatus(stats.Status)
+
+		if sc.reportStatusClasses && stats.Status != "-" {
 			stats.Status = fmt.Sprintf("%cxx", stats.Status[0])
 		}
 

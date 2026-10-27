@@ -356,6 +356,8 @@ Prometheus metrics are exposed on port 10254.
 
 ### Request metrics
 
+The `method` label is limited to `GET`, `HEAD`, `POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`, `PATCH` and the WebDAV methods `PROPFIND`, `PROPPATCH`, `MKCOL`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`. Any other method is reported as `OTHER`, and a `status` that is not a three digit code is reported as `-`.
+
 * `nginx_ingress_controller_request_duration_seconds` Histogram\
   The request processing (time elapsed between the first bytes were read from the client and the log write after the last bytes were sent to the client) time in seconds (affected by client speed).\
   nginx var: `request_time`
