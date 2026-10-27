@@ -688,3 +688,128 @@ func TestCollector(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeMethod(t *testing.T) {
+	for _, m := range []string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "PROPFIND", "MKCOL"} {
+		if got := normalizeMethod(m); got != m {
+			t.Errorf("normalizeMethod(%q) = %q, want %q", m, got, m)
+		}
+	}
+	for _, m := range []string{"", "-", "get", "AAAAAAAAAAAAAAAAAAAA", "GET ", "X_CUSTOM-METHOD"} {
+		if got := normalizeMethod(m); got != otherMethod {
+			t.Errorf("normalizeMethod(%q) = %q, want %q", m, got, otherMethod)
+		}
+	}
+}
+
+func TestNormalizeStatus(t *testing.T) {
+	cases := map[string]string{
+		"200":  "200",
+		"499":  "499",
+		"000":  "000",
+		"":     "-",
+		"-":    "-",
+		"20":   "-",
+		"2000": "-",
+		"2x0":  "-",
+		"abc":  "-",
+	}
+	for in, want := range cases {
+		if got := normalizeStatus(in); got != want {
+			t.Errorf("normalizeStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCollectorBoundsMethodCardinality(t *testing.T) {
+	for _, useStatusClasses := range []bool{false, true} {
+		t.Run(fmt.Sprintf("statusClasses=%v", useStatusClasses), func(t *testing.T) {
+			registry := prometheus.NewPedanticRegistry()
+
+			sc, err := NewSocketCollector("pod", "default", "ingress", true, false, useStatusClasses,
+				HistogramBuckets{prometheus.DefBuckets, prometheus.LinearBuckets(10, 10, 10), prometheus.ExponentialBuckets(10, 10, 7)},
+				1.1, 100, nil)
+			if err != nil {
+				t.Fatalf("unexpected error creating new SocketCollector: %v", err)
+			}
+			if err := registry.Register(sc); err != nil {
+				t.Fatalf("registering collector failed: %s", err)
+			}
+			defer registry.Unregister(sc)
+			defer sc.Stop()
+
+			sc.SetHosts(sets.New[string]("testshop.com"))
+
+			send := func(method, status string) {
+				sc.handleMessage([]byte(fmt.Sprintf(`[{
+					"host":"testshop.com",
+					"status":%q,
+					"method":%q,
+					"path":"/",
+					"requestLength":300.0,
+					"requestTime":60.0,
+					"responseLength":100.0,
+					"upstreamLatency":1.0,
+					"upstreamHeaderTime":5.0,
+					"upstreamResponseTime":200,
+					"namespace":"ns",
+					"ingress":"ing",
+					"service":"svc",
+					"canary":""
+				}]`, status, method)))
+			}
+
+			send("GET", "200")
+			for i := 0; i < 1000; i++ {
+				send(fmt.Sprintf("RANDOM_METHOD_%04d", i), "200")
+				send("GET", fmt.Sprintf("2%02d%d", i%100, i))
+			}
+
+			mfs, err := registry.Gather()
+			if err != nil {
+				t.Fatalf("gather failed: %v", err)
+			}
+
+			found := false
+			for _, mf := range mfs {
+				if mf.GetName() != "nginx_ingress_controller_requests" {
+					continue
+				}
+				found = true
+				counts := map[string]float64{}
+				for _, m := range mf.GetMetric() {
+					var method, status string
+					for _, lp := range m.GetLabel() {
+						switch lp.GetName() {
+						case "method":
+							method = lp.GetValue()
+						case "status":
+							status = lp.GetValue()
+						}
+					}
+					counts[method+" "+status] += m.GetCounter().GetValue()
+				}
+				okStatus := "200"
+				if useStatusClasses {
+					okStatus = "2xx"
+				}
+				want := map[string]float64{
+					"GET " + okStatus:   1,
+					"OTHER " + okStatus: 1000,
+					"GET -":             1000,
+				}
+				if len(counts) != len(want) {
+					t.Fatalf("expected %d series, got %d: %v", len(want), len(counts), counts)
+				}
+				for k, v := range want {
+					if counts[k] != v {
+						t.Errorf("series %q = %v, want %v (all: %v)", k, counts[k], v, counts)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("nginx_ingress_controller_requests not gathered")
+			}
+		})
+	}
+}
