@@ -79,6 +79,15 @@ func TestInspectIngress(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:     "invalid-path-nginx-syntax",
+			hostname: "invalid.syntax.com",
+			path: []string{
+				"/mypage",
+				"/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#",
+			},
+			wantErr: true,
+		},
+		{
 			name:     "invalid-path-etc",
 			hostname: "invalid.etc.com",
 			path: []string{

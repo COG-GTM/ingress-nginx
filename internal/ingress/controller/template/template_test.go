@@ -1956,3 +1956,67 @@ func TestCleanConf(t *testing.T) {
 		t.Errorf("cleanConf result don't match with expected: %s", diff)
 	}
 }
+
+func TestBuildLocationEscapesNginxSyntax(t *testing.T) {
+	pathExact := networking.PathTypeExact
+	injection := "/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#"
+
+	cases := []struct {
+		name         string
+		path         string
+		pathType     *networking.PathType
+		enforceRegex bool
+		expected     string
+	}{
+		{"plain prefix", "/foo", &pathPrefix, false, "/foo"},
+		{"plain exact", "/foo", &pathExact, false, "= /foo"},
+		{"plain regex", "/foo/[a-z]+", &pathPrefix, true, `~* "^/foo/[a-z]+"`},
+		{"regex backslash", `/foo\.php$`, &pathPrefix, true, `~* "^/foo\\.php$"`},
+		{"braces prefix", "/foo{3}", &pathPrefix, false, `"/foo{3}"`},
+		{"injection prefix", injection, &pathPrefix, false, `"/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#"`},
+		{"injection exact", injection, &pathExact, false, `= "/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#"`},
+		{"injection regex", injection, &pathPrefix, true, `~* "^/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#"`},
+		{"quote breakout regex", `/x"; } ssl_engine /tmp/x.so; location ~ "`, &pathPrefix, true, `~* "^/x\"; } ssl_engine /tmp/x.so; location ~ \""`},
+		{"trailing backslash regex", `/x\`, &pathPrefix, true, `~* "^/x\\"`},
+	}
+
+	for _, tc := range cases {
+		loc := &ingress.Location{Path: tc.path, PathType: tc.pathType}
+		if actual := buildLocation(loc, tc.enforceRegex); actual != tc.expected {
+			t.Errorf("%s: expected %q but returned %q", tc.name, tc.expected, actual)
+		}
+	}
+}
+
+func TestBuildProxyPassEscapesRewritePath(t *testing.T) {
+	loc := &ingress.Location{
+		Path:     "/x\" break;\n}\nssl_engine /tmp/x.so;\nlocation ~ \"",
+		PathType: &pathPrefix,
+		Rewrite:  rewrite.Config{Target: "/$1"},
+		Backend:  defaultBackend,
+	}
+	backends := []*ingress.Backend{{Name: defaultBackend}}
+
+	expected := `
+rewrite "(?i)/x\" break;\n}\nssl_engine /tmp/x.so;\nlocation ~ \"" /$1 break;
+proxy_pass http://upstream_balancer;`
+	if actual := buildProxyPass(defaultHost, backends, loc); actual != expected {
+		t.Errorf("expected \n%q\nbut returned \n%q", expected, actual)
+	}
+}
+
+func TestEscapeComment(t *testing.T) {
+	cases := map[string]string{
+		"/foo":                  "/foo",
+		"/x\nssl_engine /a.so;": `/x\nssl_engine /a.so;`,
+		"/x\r\n":                `/x\r\n`,
+	}
+	for input, expected := range cases {
+		if actual := escapeComment(input); actual != expected {
+			t.Errorf("escapeComment(%q): expected %q but returned %q", input, expected, actual)
+		}
+	}
+	if actual := escapeComment(1); actual != "" {
+		t.Errorf("expected empty string for non-string input, got %q", actual)
+	}
+}

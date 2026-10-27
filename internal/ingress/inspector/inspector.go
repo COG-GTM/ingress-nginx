@@ -63,3 +63,23 @@ func ValidatePathType(ing *networking.Ingress) error {
 	}
 	return err
 }
+
+// ValidatePathCharacters checks every path of the ingress, regardless of its pathType,
+// for characters that are part of the nginx configuration syntax.
+func ValidatePathCharacters(ing *networking.Ingress) error {
+	if ing == nil {
+		return fmt.Errorf("received null ingress")
+	}
+	var err error
+	for _, rule := range ing.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			if pathErr := CheckPath(path.Path); pathErr != nil {
+				err = errors.Join(err, pathErr)
+			}
+		}
+	}
+	return err
+}

@@ -275,6 +275,7 @@ var funcMap = text_template.FuncMap{
 		return true
 	},
 	"escapeLiteralDollar":             escapeLiteralDollar,
+	"escapeComment":                   escapeComment,
 	"buildLuaSharedDictionaries":      buildLuaSharedDictionaries,
 	"luaConfigurationRequestBodySize": luaConfigurationRequestBodySize,
 	"buildLocation":                   buildLocation,
@@ -527,14 +528,52 @@ func buildLocation(input interface{}, enforceRegex bool) string {
 
 	path := location.Path
 	if enforceRegex {
-		return fmt.Sprintf(`~* "^%s"`, path)
+		return fmt.Sprintf(`~* %s`, quoteNginxString("^"+path))
 	}
 
 	if location.PathType != nil && *location.PathType == networkingv1.PathTypeExact {
-		return fmt.Sprintf(`= %s`, path)
+		return fmt.Sprintf(`= %s`, nginxToken(path))
 	}
 
-	return path
+	return nginxToken(path)
+}
+
+// nginxSyntaxChars matches characters that nginx treats as configuration syntax
+// in an unquoted token: whitespace, quotes, escapes, comments and statement or
+// block delimiters.
+var nginxSyntaxChars = regexp.MustCompile(`[\s\x00-\x1f\x7f;{}"'#\\]`)
+
+var nginxStringEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`"`, `\"`,
+	"\n", `\n`,
+	"\r", `\r`,
+	"\t", `\t`,
+)
+
+// quoteNginxString returns s as a double-quoted nginx string literal whose
+// unescaped value is exactly s.
+func quoteNginxString(s string) string {
+	return `"` + nginxStringEscaper.Replace(s) + `"`
+}
+
+// nginxToken returns s unchanged when it is a plain nginx token and as a
+// quoted nginx string literal when it contains configuration syntax.
+func nginxToken(s string) string {
+	if nginxSyntaxChars.MatchString(s) {
+		return quoteNginxString(s)
+	}
+	return s
+}
+
+// escapeComment makes s safe to be rendered inside a "#" comment line.
+func escapeComment(input interface{}) string {
+	s, ok := input.(string)
+	if !ok {
+		return ""
+	}
+	quoted := strconv.Quote(s)
+	return quoted[1 : len(quoted)-1]
 }
 
 func buildAuthLocation(input interface{}, globalExternalAuthURL string) string {
@@ -775,8 +814,8 @@ func buildProxyPass(_ string, b, loc interface{}) string {
 		}
 
 		return fmt.Sprintf(`
-rewrite "(?i)%s" %s break;
-%v%v %s%s;`, path, location.Rewrite.Target, xForwardedPrefix, proxyPass, proto, upstreamName)
+rewrite %s %s break;
+%v%v %s%s;`, quoteNginxString("(?i)"+path), location.Rewrite.Target, xForwardedPrefix, proxyPass, proto, upstreamName)
 	}
 
 	// default proxy_pass

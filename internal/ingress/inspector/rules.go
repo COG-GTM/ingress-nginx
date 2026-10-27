@@ -19,6 +19,7 @@ package inspector
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 var (
@@ -35,6 +36,15 @@ var (
 	// are accepted until the end of the line
 	// Nothing else is accepted.
 	validPathType = regexp.MustCompile(`(?i)^/[[:alnum:]\_\-/]*$`)
+
+	// invalidPathCharacters matches characters that are part of the nginx configuration
+	// syntax (token separators, quotes, comments, statement and block delimiters) and
+	// therefore must never be part of an Ingress path, regardless of its pathType.
+	invalidPathCharacters = regexp.MustCompile("[\\s\\x00-\\x1f\\x7f;\"'`#]")
+
+	// regexQuantifier matches a regular expression repetition like {3}, {3,} or {3,5}.
+	// These are the only places where braces are accepted in a path.
+	regexQuantifier = regexp.MustCompile(`\{[0-9]+(,[0-9]*)?\}`)
 
 	invalidRegex = []regexp.Regexp{}
 )
@@ -56,6 +66,18 @@ func CheckRegex(value string) error {
 		if invalidRegex[i].MatchString(value) {
 			return fmt.Errorf("invalid value found: %s", value)
 		}
+	}
+	return nil
+}
+
+// CheckPath validates that an Ingress path does not contain characters that could
+// terminate the nginx token, directive or block it is rendered into.
+func CheckPath(path string) error {
+	if invalidPathCharacters.MatchString(path) {
+		return fmt.Errorf("path %q contains invalid characters", path)
+	}
+	if strings.ContainsAny(regexQuantifier.ReplaceAllString(path, ""), "{}") {
+		return fmt.Errorf("path %q contains braces that are not part of a regex quantifier", path)
 	}
 	return nil
 }

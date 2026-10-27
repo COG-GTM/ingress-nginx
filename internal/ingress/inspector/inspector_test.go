@@ -189,3 +189,43 @@ func TestValidatePathType(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePathCharacters(t *testing.T) {
+	injection := "/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#"
+	ing := &networking.Ingress{
+		Spec: networking.IngressSpec{
+			Rules: []networking.IngressRule{
+				{
+					IngressRuleValue: networking.IngressRuleValue{
+						HTTP: &networking.HTTPIngressRuleValue{
+							Paths: []networking.HTTPIngressPath{
+								{PathType: &implSpecific, Path: "/foo/[a-z]{3}(/|$)(.*)"},
+								{PathType: &implSpecific, Path: injection},
+								{PathType: &prefix, Path: "/a;b"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := ValidatePathCharacters(nil); err == nil {
+		t.Errorf("expected an error for a nil ingress")
+	}
+	if err := ValidatePathCharacters(validIngress); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if err := ValidatePathCharacters(validImplSpecific); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	err := ValidatePathCharacters(ing)
+	if err == nil {
+		t.Fatalf("expected an error for paths containing nginx syntax")
+	}
+	errs, ok := err.(interface{ Unwrap() []error })
+	if !ok || len(errs.Unwrap()) != 2 {
+		t.Errorf("expected two joined errors, got %v", err)
+	}
+}

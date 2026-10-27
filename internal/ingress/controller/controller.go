@@ -349,6 +349,10 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 	cfg := n.store.GetBackendConfiguration()
 	cfg.Resolver = n.resolver
 
+	if err := inspector.ValidatePathCharacters(ing); err != nil {
+		return fmt.Errorf("ingress contains invalid paths: %w", err)
+	}
+
 	// Adds the pathType Validation
 	if cfg.StrictValidatePathType {
 		if err := inspector.ValidatePathType(ing); err != nil {
@@ -785,6 +789,11 @@ func (n *NGINXController) getBackendServers(ingresses []*ingress.Ingress) ([]*in
 				nginxPath := rootLocation
 				if path.Path != "" {
 					nginxPath = path.Path
+				}
+
+				if err := inspector.CheckPath(nginxPath); err != nil {
+					klog.Warningf("Ignoring path of Ingress %q: %v", ingKey, err)
+					continue
 				}
 
 				addLoc := true
