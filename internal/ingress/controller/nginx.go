@@ -120,6 +120,11 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 			ReadHeaderTimeout: 10 * time.Second,
 			Handler:           adm_controller.NewAdmissionControllerServer(&adm_controller.IngressAdmission{Checker: n}),
 			TLSConfig:         ssl.NewTLSListener(n.cfg.ValidationWebhookCertPath, n.cfg.ValidationWebhookKeyPath).TLSConfig(),
+			// bound slow request bodies; the write timeout covers the admission
+			// queue wait plus nginx -t (the API server's webhook timeout is at most 30s)
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 60 * time.Second,
+			IdleTimeout:  120 * time.Second,
 			// disable http/2
 			// https://github.com/kubernetes/kubernetes/issues/80313
 			// https://github.com/kubernetes/ingress-nginx/issues/6323#issuecomment-737239159
