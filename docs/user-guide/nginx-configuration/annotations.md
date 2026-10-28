@@ -429,9 +429,14 @@ Allows the definition of one or more aliases in the server definition of the NGI
 This will create a server with the same configuration, but adding new values to the `server_name` directive.
 
 !!! note
-	  A server-alias name cannot conflict with the hostname of an existing server. If it does, the server-alias annotation will be ignored.
+	  A server-alias name cannot conflict with the hostname of an existing server. Aliases are lowercased and compared the way nginx matches
+    `server_name` values, so `App.example.com`, `.example.com`, `*.example.com`, `app.*` and regex aliases that would match another
+    server's hostname (including names covered by a `*.example.com` host) are ignored by the controller and rejected by the admission webhook.
     If a server-alias is created and later a new server with the same hostname is created, the new server configuration will take
     place over the alias configuration.
+
+!!! warning
+    In multi-tenant clusters, consider setting `annotations-risk-level` below `High` to disable `server-alias` entirely.
 
 For more information please see [the `server_name` documentation](https://nginx.org/en/docs/http/ngx_http_core_module.html#server_name).
 

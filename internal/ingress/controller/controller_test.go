@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -2678,5 +2679,150 @@ func newDynamicNginxController(t *testing.T, setConfigMap func(string) *corev1.C
 		cfg:             config,
 		command:         NewNginxCommand(),
 		metricCollector: metric.DummyCollector{},
+	}
+}
+
+func aliasTestIngress(namespace, name, host string, aliases []string) *ingress.Ingress {
+	return &ingress.Ingress{
+		Ingress: networking.Ingress{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: networking.IngressSpec{
+				Rules: []networking.IngressRule{
+					{
+						Host: host,
+						IngressRuleValue: networking.IngressRuleValue{
+							HTTP: &networking.HTTPIngressRuleValue{
+								Paths: []networking.HTTPIngressPath{
+									{
+										Path:     "/",
+										PathType: &pathTypePrefix,
+										Backend: networking.IngressBackend{
+											Service: &networking.IngressServiceBackend{
+												Name: "http-svc",
+												Port: networking.ServiceBackendPort{
+													Number: 80,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		ParsedAnnotations: &annotations.Ingress{
+			Aliases: aliases,
+		},
+	}
+}
+
+func TestServerAliasCannotTakeOverOtherHosts(t *testing.T) {
+	ingresses := []*ingress.Ingress{
+		aliasTestIngress("shop", "app", "app.acme.example", nil),
+		aliasTestIngress("wild", "wild", "*.wild.example", nil),
+		aliasTestIngress("sandbox", "mallory", "*.sandbox.example", []string{
+			"App.acme.example",
+			".acme.example",
+			"*.Acme.example",
+			"app.*",
+			"x.wild.example",
+			".wild.example",
+			"*.Wild.example",
+			`~^admin\.wild\.example$`,
+			"Mallory.Example.",
+		}),
+	}
+
+	nginxController := newDynamicNginxController(t, testConfigMap)
+	_, servers := nginxController.getBackendServers(ingresses)
+
+	var attacker *ingress.Server
+	for _, server := range servers {
+		if server.Hostname == "*.sandbox.example" {
+			attacker = server
+		}
+		if server.Hostname != "*.sandbox.example" && len(server.Aliases) != 0 {
+			t.Errorf("server %q should not have aliases, got %v", server.Hostname, server.Aliases)
+		}
+	}
+	if attacker == nil {
+		t.Fatalf("expected a server for *.sandbox.example")
+	}
+
+	expected := []string{"mallory.example"}
+	if !reflect.DeepEqual(attacker.Aliases, expected) {
+		t.Errorf("expected aliases %v, got %v", expected, attacker.Aliases)
+	}
+}
+
+func TestCheckIngressRejectsOverlappingServerAlias(t *testing.T) {
+	nginx := newNGINXController(t)
+	nginx.metricCollector = metric.DummyCollector{}
+	nginx.t = fakeTemplate{}
+
+	victim := aliasTestIngress("shop", "app", "app.acme.example", nil)
+	wildVictim := aliasTestIngress("wild", "wild", "*.wild.example", nil)
+	nginx.store = &fakeIngressStore{
+		ingresses: []*ingress.Ingress{victim, wildVictim},
+		configuration: ngx_config.Configuration{
+			AnnotationsRiskLevel: "Critical",
+		},
+	}
+
+	for _, alias := range []string{"App.acme.example", ".acme.example", "*.Victim.example,*.Acme.example", ".wild.example", "x.wild.example", "*.Wild.example"} {
+		attacker := aliasTestIngress("sandbox", "mallory", "*.sandbox.example", nil).Ingress
+		attacker.Annotations = map[string]string{
+			"kubernetes.io/ingress.class":                  "nginx",
+			parser.GetAnnotationWithPrefix("server-alias"): alias,
+		}
+		nginx.command = testNginxTestCommand{t: t}
+
+		err := nginx.CheckIngress(&attacker)
+		if err == nil || !strings.Contains(err.Error(), "server-alias") {
+			t.Errorf("server-alias %q: expected overlap error, got %v", alias, err)
+		}
+	}
+
+	attacker := aliasTestIngress("sandbox", "mallory", "*.sandbox.example", nil).Ingress
+	attacker.Annotations = map[string]string{
+		"kubernetes.io/ingress.class":                  "nginx",
+		parser.GetAnnotationWithPrefix("server-alias"): "mallory.example",
+	}
+	nginx.command = testNginxTestCommand{
+		t:        t,
+		expected: "*.sandbox.example,*.wild.example,_,app.acme.example",
+	}
+	if err := nginx.CheckIngress(&attacker); err != nil {
+		t.Errorf("non-overlapping server-alias should be accepted, got %v", err)
+	}
+
+	sharedHost := aliasTestIngress("sandbox", "mallory", "app.acme.example", nil).Ingress
+	sharedHost.Spec.Rules[0].HTTP.Paths[0].Path = "/mallory"
+	sharedHost.Annotations = map[string]string{
+		"kubernetes.io/ingress.class":                  "nginx",
+		parser.GetAnnotationWithPrefix("server-alias"): ".acme.example",
+	}
+	nginx.command = testNginxTestCommand{t: t}
+	if err := nginx.CheckIngress(&sharedHost); err == nil || !strings.Contains(err.Error(), "server-alias") {
+		t.Errorf("server-alias on a host shared with another ingress: expected overlap error, got %v", err)
+	}
+
+	canaryIng := aliasTestIngress("shop", "app-canary", "app.acme.example", nil).Ingress
+	canaryIng.Annotations = map[string]string{
+		"kubernetes.io/ingress.class":                  "nginx",
+		parser.GetAnnotationWithPrefix("canary"):       "true",
+		parser.GetAnnotationWithPrefix("server-alias"): ".wild.example",
+	}
+	nginx.command = testNginxTestCommand{
+		t:        t,
+		expected: "*.wild.example,_,app.acme.example",
+	}
+	if err := nginx.CheckIngress(&canaryIng); err != nil {
+		t.Errorf("canary ingress aliases are ignored and should not block admission, got %v", err)
 	}
 }

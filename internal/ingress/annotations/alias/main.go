@@ -71,7 +71,7 @@ func (a alias) Parse(ing *networking.Ingress) (interface{}, error) {
 
 	aliases := sets.NewString()
 	for _, alias := range strings.Split(val, ",") {
-		alias = strings.TrimSpace(alias)
+		alias = normalizeAlias(alias)
 		if alias == "" {
 			continue
 		}
@@ -85,6 +85,16 @@ func (a alias) Parse(ing *networking.Ingress) (interface{}, error) {
 	sort.Strings(l)
 
 	return l, nil
+}
+
+// normalizeAlias lowercases non-regex aliases and strips a trailing dot, so the value
+// compared against other hostnames matches what nginx compares at request time.
+func normalizeAlias(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if strings.HasPrefix(alias, "~") {
+		return alias
+	}
+	return strings.TrimSuffix(strings.ToLower(alias), ".")
 }
 
 func (a alias) Validate(anns map[string]string) error {
