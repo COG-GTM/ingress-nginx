@@ -623,10 +623,18 @@ func buildAuthProxySetHeaders(headers map[string]string) []string {
 	}
 
 	for name, value := range headers {
-		res = append(res, fmt.Sprintf("proxy_set_header '%v' '%v';", name, value))
+		res = append(res, fmt.Sprintf("proxy_set_header '%v' '%v';", escapeNginxSingleQuoted(name), escapeNginxSingleQuoted(value)))
 	}
 	sort.Strings(res)
 	return res
+}
+
+var nginxSingleQuotedReplacer = strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", "", "\r", "")
+
+// escapeNginxSingleQuoted makes s safe to embed inside a single-quoted nginx
+// string by escaping backslashes and single quotes and dropping line breaks.
+func escapeNginxSingleQuoted(s string) string {
+	return nginxSingleQuotedReplacer.Replace(s)
 }
 
 func buildAuthUpstreamName(input interface{}, host string) string {
