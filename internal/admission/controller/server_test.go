@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,7 +37,10 @@ type recordingAdmissionController struct {
 
 func (r *recordingAdmissionController) HandleAdmission(obj runtime.Object) (runtime.Object, error) {
 	r.calls++
-	review := obj.(*admissionv1.AdmissionReview)
+	review, ok := obj.(*admissionv1.AdmissionReview)
+	if !ok {
+		return nil, fmt.Errorf("unexpected object %T", obj)
+	}
 	review.Response = &admissionv1.AdmissionResponse{Allowed: true}
 	return review, nil
 }
