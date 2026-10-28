@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,12 +115,17 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 	}
 
 	if n.cfg.ValidationWebhook != "" {
+		admissionServer := adm_controller.NewAdmissionControllerServer(&adm_controller.IngressAdmission{Checker: n})
+		admissionServer.RequireClientCert = n.cfg.ValidationWebhookClientCAPath != ""
+		admissionServer.AllowedClientNames = n.cfg.ValidationWebhookAllowedClientNames
+
 		n.validationWebhookServer = &http.Server{
 			Addr: config.ValidationWebhook,
 			// G112 (CWE-400): Potential Slowloris Attack
 			ReadHeaderTimeout: 10 * time.Second,
-			Handler:           adm_controller.NewAdmissionControllerServer(&adm_controller.IngressAdmission{Checker: n}),
-			TLSConfig:         ssl.NewTLSListener(n.cfg.ValidationWebhookCertPath, n.cfg.ValidationWebhookKeyPath).TLSConfig(),
+			Handler:           admissionServer,
+			TLSConfig: ssl.NewTLSListenerWithClientCA(n.cfg.ValidationWebhookCertPath, n.cfg.ValidationWebhookKeyPath,
+				n.cfg.ValidationWebhookClientCAPath).TLSConfig(),
 			// disable http/2
 			// https://github.com/kubernetes/kubernetes/issues/80313
 			// https://github.com/kubernetes/ingress-nginx/issues/6323#issuecomment-737239159
@@ -643,6 +649,9 @@ func (n *NGINXController) testTemplate(cfg []byte) error {
 	if len(cfg) == 0 {
 		return fmt.Errorf("invalid NGINX configuration (empty)")
 	}
+	if err := checkForbiddenDirectives(cfg); err != nil {
+		return err
+	}
 	tmpfile, err := os.CreateTemp(filepath.Join(os.TempDir(), "nginx"), tempNginxPattern)
 	if err != nil {
 		return err
@@ -666,6 +675,28 @@ Error: %v
 	}
 
 	os.Remove(tmpfile.Name())
+	return nil
+}
+
+// allowedModulesDir is the only directory dynamic modules may be loaded from.
+const allowedModulesDir = "/etc/nginx/modules/"
+
+// codeLoadingDirective matches directives that make nginx load and execute shared
+// objects while it parses (and tests) a configuration.
+var codeLoadingDirective = regexp.MustCompile(`(?:^|[\s;{}])(ssl_engine|load_module)\s+([^;]*);`)
+
+// checkForbiddenDirectives rejects generated configurations that would make nginx load
+// arbitrary shared objects: any ssl_engine directive, and load_module directives that
+// point outside of allowedModulesDir.
+func checkForbiddenDirectives(cfg []byte) error {
+	for _, m := range codeLoadingDirective.FindAllSubmatch(cfg, -1) {
+		directive, arg := string(m[1]), strings.Trim(strings.TrimSpace(string(m[2])), `"'`)
+		if directive == "load_module" && strings.HasPrefix(arg, allowedModulesDir) &&
+			filepath.Clean(arg) == arg && !strings.ContainsAny(arg, " \t\r\n") {
+			continue
+		}
+		return fmt.Errorf("invalid NGINX configuration: directive %q with argument %q is not allowed", directive, arg)
+	}
 	return nil
 }
 

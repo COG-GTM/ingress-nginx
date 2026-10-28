@@ -155,6 +155,43 @@ func (ntc testNginxTestCommand) Test(cfg string) ([]byte, error) {
 	return ntc.out, ntc.err
 }
 
+type failingNginxTestCommand struct {
+	t *testing.T
+}
+
+func (failingNginxTestCommand) ExecCommand(_ ...string) *exec.Cmd {
+	return nil
+}
+
+func (f failingNginxTestCommand) Test(_ string) ([]byte, error) {
+	f.t.Errorf("nginx -t must not be executed")
+	return nil, fmt.Errorf("nginx -t must not be executed")
+}
+
+func TestCheckForbiddenDirectives(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     string
+		wantErr bool
+	}{
+		{"no directives", "events {}\nhttp {\n}\n", false},
+		{"bundled module", "load_module /etc/nginx/modules/ngx_http_geoip2_module.so;\n", false},
+		{"ssl_engine", "http {\nif ( $ssl_client_s_dn !~ a ) {\n}\nssl_engine /proc/1/fd/10;\n}", true},
+		{"ssl_engine after brace", "}ssl_engine x;", true},
+		{"module outside modules dir", "load_module /tmp/evil.so;", true},
+		{"module path traversal", "load_module /etc/nginx/modules/../../../tmp/evil.so;", true},
+		{"module via proc", "load_module /proc/self/fd/7;", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkForbiddenDirectives([]byte(tt.cfg))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("checkForbiddenDirectives() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 type fakeTemplate struct{}
 
 func (fakeTemplate) Write(conf *ngx_config.TemplateConfig) ([]byte, error) {
@@ -250,15 +287,10 @@ func TestCheckIngress(t *testing.T) {
 			}
 		})
 
-		t.Run("When nginx test returns an error", func(t *testing.T) {
-			nginx.command = testNginxTestCommand{
-				t:        t,
-				err:      fmt.Errorf("test error"),
-				out:      []byte("this is the test command output"),
-				expected: "_,test.example.com",
-			}
-			if nginx.CheckIngress(ing) == nil {
-				t.Errorf("with a new ingress with an error, an error should be returned")
+		t.Run("Admission does not run nginx -t on the generated configuration", func(t *testing.T) {
+			nginx.command = failingNginxTestCommand{t: t}
+			if err := nginx.CheckIngress(ing); err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 

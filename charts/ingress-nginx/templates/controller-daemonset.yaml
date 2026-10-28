@@ -163,6 +163,11 @@ spec:
             - name: webhook-cert
               mountPath: /usr/local/certificates/
               readOnly: true
+          {{- if .Values.controller.admissionWebhooks.clientAuth.enabled }}
+            - name: webhook-client-ca
+              mountPath: {{ .Values.controller.admissionWebhooks.clientAuth.mountPath }}
+              readOnly: true
+          {{- end }}
           {{- end }}
           {{- if .Values.controller.extraVolumeMounts }}
             {{- toYaml .Values.controller.extraVolumeMounts | nindent 12 }}
@@ -218,6 +223,18 @@ spec:
               path: nginx.tmpl
       {{- end }}
       {{- if .Values.controller.admissionWebhooks.enabled }}
+        {{- if .Values.controller.admissionWebhooks.clientAuth.enabled }}
+        - name: webhook-client-ca
+        {{- if .Values.controller.admissionWebhooks.clientAuth.caSecret }}
+          secret:
+            secretName: {{ .Values.controller.admissionWebhooks.clientAuth.caSecret }}
+        {{- else if .Values.controller.admissionWebhooks.clientAuth.caConfigMap }}
+          configMap:
+            name: {{ .Values.controller.admissionWebhooks.clientAuth.caConfigMap }}
+        {{- else }}
+          {{- fail "controller.admissionWebhooks.clientAuth.enabled requires clientAuth.caSecret or clientAuth.caConfigMap" }}
+        {{- end }}
+        {{- end }}
         - name: webhook-cert
           secret:
             secretName: {{ include "ingress-nginx.admissionWebhooks.fullname" . }}

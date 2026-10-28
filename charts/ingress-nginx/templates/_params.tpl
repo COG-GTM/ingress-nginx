@@ -38,6 +38,12 @@
 - --validating-webhook=:{{ .Values.controller.admissionWebhooks.port }}
 - --validating-webhook-certificate={{ .Values.controller.admissionWebhooks.certificate }}
 - --validating-webhook-key={{ .Values.controller.admissionWebhooks.key }}
+{{- if .Values.controller.admissionWebhooks.clientAuth.enabled }}
+- --validating-webhook-client-ca={{ .Values.controller.admissionWebhooks.clientAuth.mountPath }}/{{ .Values.controller.admissionWebhooks.clientAuth.caKey }}
+{{- with .Values.controller.admissionWebhooks.clientAuth.allowedClientNames }}
+- --validating-webhook-allowed-client-names={{ join "," . }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .Values.controller.maxmindLicenseKey }}
 - --maxmind-license-key={{ .Values.controller.maxmindLicenseKey }}

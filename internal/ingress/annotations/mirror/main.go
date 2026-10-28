@@ -97,6 +97,8 @@ func (m1 *Config) Equal(m2 *Config) bool {
 	return true
 }
 
+var uidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 type mirror struct {
 	r                resolver.Resolver
 	annotationConfig parser.Annotation
@@ -113,6 +115,13 @@ func NewParser(r resolver.Resolver) parser.IngressAnnotation {
 // ParseAnnotations parses the annotations contained in the ingress
 // rule used to configure mirror
 func (a mirror) Parse(ing *networking.Ingress) (interface{}, error) {
+	// The UID comes from the request object and is rendered into the NGINX
+	// configuration, so only accept the UUID format the API server generates.
+	if ing.UID != "" && !uidRegex.MatchString(string(ing.UID)) {
+		klog.Warningf("ingress %s/%s has an invalid UID, ignoring mirror annotations", ing.Namespace, ing.Name)
+		return &Config{}, nil
+	}
+
 	config := &Config{
 		Source: fmt.Sprintf("/_mirror-%v", ing.UID),
 	}

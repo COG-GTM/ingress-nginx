@@ -208,6 +208,13 @@ func (a authTLS) Parse(ing *networking.Ingress) (interface{}, error) {
 		}
 		config.MatchCN = ""
 	}
+	// The value is rendered into the NGINX configuration, so it is always validated,
+	// even when annotation validation is disabled.
+	if config.MatchCN != "" {
+		if err := parser.CommonNameAnnotationValidator(config.MatchCN); err != nil {
+			return &Config{}, ing_errors.NewValidationError(annotationAuthTLSMatchCN)
+		}
+	}
 
 	return config, nil
 }
