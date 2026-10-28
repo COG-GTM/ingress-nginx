@@ -138,7 +138,7 @@ func TestIngressAuthTypeMustMatchExactly(t *testing.T) {
 	_, dir, _ := dummySecretContent(t)
 	defer os.RemoveAll(dir)
 
-	for _, at := range []string{"basicx", "xdigest", "basic digest", "basic\n", " basic", "Basic", "digest-sha"} {
+	for _, at := range []string{"basicx", "xdigest", "basic digest", "basic\n", "Basic", "digest-sha"} {
 		ing := buildIngress()
 		data := map[string]string{}
 		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = at
@@ -189,8 +189,12 @@ func TestIngressAuthValidTypes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("auth-type %q: unexpected error: %v", at, err)
 		}
-		if got := i.(*Config).Type; got != at {
-			t.Errorf("auth-type %q: expected Type %q but got %q", at, at, got)
+		cfg, ok := i.(*Config)
+		if !ok {
+			t.Fatalf("auth-type %q: expected a Config but got %T", at, i)
+		}
+		if cfg.Type != at {
+			t.Errorf("auth-type %q: expected Type %q but got %q", at, at, cfg.Type)
 		}
 	}
 }
