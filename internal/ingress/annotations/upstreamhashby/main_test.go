@@ -116,7 +116,11 @@ func TestParseSubsetSize(t *testing.T) {
 		if testCase.expectErr {
 			continue
 		}
-		if got := result.(*Config).UpstreamHashBySubsetSize; got != testCase.expected {
+		cfg, ok := result.(*Config)
+		if !ok {
+			t.Fatalf("value %q: expected a *Config", testCase.value)
+		}
+		if got := cfg.UpstreamHashBySubsetSize; got != testCase.expected {
 			t.Errorf("value %q: expected subset size %d, got %d", testCase.value, testCase.expected, got)
 		}
 	}
