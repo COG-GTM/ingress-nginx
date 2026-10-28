@@ -38,6 +38,8 @@ import (
 	"time"
 
 	certutil "k8s.io/client-go/util/cert"
+
+	"k8s.io/ingress-nginx/pkg/apis/ingress"
 	"k8s.io/ingress-nginx/pkg/util/file"
 )
 
@@ -184,10 +186,131 @@ func TestConfigureCACert(t *testing.T) {
 		t.Fatalf("unexpected error creating SSL certificate: %v", err)
 	}
 
-	caFilename := fmt.Sprintf("%v/ca-%v.pem", file.DefaultSSLDirectory, cn)
+	caFilename := fmt.Sprintf("%v/ca_%v.pem", file.DefaultSSLDirectory, cn)
 
 	if sslCert.CAFileName != caFilename {
 		t.Fatalf("expected a valid CA file name")
+	}
+}
+
+func TestSecretFileName(t *testing.T) {
+	valid := map[string]string{
+		"default/tls":              "default_tls",
+		"payments/client-ca":       "payments_client-ca",
+		"payments-client/ca":       "payments-client_ca",
+		"ca-payments/client-ca":    "ca-payments_client-ca",
+		"default/fake-certificate": "default_fake-certificate",
+		"ns/my.secret":             "ns_my.secret",
+	}
+	for key, expected := range valid {
+		got, err := SecretFileName(key)
+		if err != nil {
+			t.Errorf("SecretFileName(%q) returned unexpected error: %v", key, err)
+			continue
+		}
+		if got != expected {
+			t.Errorf("SecretFileName(%q) = %q, expected %q", key, got, expected)
+		}
+		if got == fakeCertificateName {
+			t.Errorf("SecretFileName(%q) collides with the fake certificate name", key)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"tls",
+		"/tls",
+		"default/",
+		"default/a/b",
+		"default/../../etc/passwd",
+		"default/a_b",
+		"de_fault/tls",
+		"Default/tls",
+		"default/.hidden",
+	}
+	for _, key := range invalid {
+		if got, err := SecretFileName(key); err == nil {
+			t.Errorf("SecretFileName(%q) = %q, expected an error", key, got)
+		}
+	}
+}
+
+func TestSecretFilesDoNotCollideAcrossNamespaces(t *testing.T) {
+	writeCA := func(key string) (string, []byte) {
+		name, err := SecretFileName(key)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_, ca, err := generateRSACerts(key)
+		if err != nil {
+			t.Fatalf("unexpected error creating CA: %v", err)
+		}
+		c := encodeCertPEM(ca.Cert)
+		sslCert, err := CreateCACert(c)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := ConfigureCACert(name, c, sslCert); err != nil {
+			t.Fatalf("unexpected error configuring CA for %v: %v", key, err)
+		}
+		return sslCert.CAFileName, c
+	}
+
+	writePem := func(key string) string {
+		name, err := SecretFileName(key)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		cert, _, err := generateRSACerts(key)
+		if err != nil {
+			t.Fatalf("unexpected error creating certificate: %v", err)
+		}
+		sslCert, err := CreateSSLCert(encodeCertPEM(cert.Cert), encodePrivateKeyPEM(cert.Key), FakeSSLCertificateUID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		path, err := StoreSSLCertOnDisk(name, sslCert)
+		if err != nil {
+			t.Fatalf("unexpected error storing certificate for %v: %v", key, err)
+		}
+		return path
+	}
+
+	victimPath, victimCA := writeCA("payments/client-ca")
+	files := map[string]string{victimPath: "payments/client-ca (ca)"}
+	record := func(path, owner string) {
+		if other, ok := files[path]; ok {
+			t.Fatalf("%v and %v map to the same file %v", owner, other, path)
+		}
+		files[path] = owner
+	}
+
+	attackerPath, _ := writeCA("payments-client/ca")
+	record(attackerPath, "payments-client/ca (ca)")
+	record(writePem("ca-payments/client-ca"), "ca-payments/client-ca (pem)")
+	record(writePem("payments/client-ca"), "payments/client-ca (pem)")
+	record(writePem("default/fake-certificate"), "default/fake-certificate (pem)")
+
+	fakePath, _, err := getPemFileName(fakeCertificateName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	record(fakePath, "fake certificate")
+
+	content, err := os.ReadFile(victimPath)
+	if err != nil {
+		t.Fatalf("unexpected error reading %v: %v", victimPath, err)
+	}
+	if !bytes.Equal(content, victimCA) {
+		t.Fatalf("CA file %v was overwritten by another Secret", victimPath)
+	}
+}
+
+func TestStoreSSLCertOnDiskRejectsPaths(t *testing.T) {
+	for _, name := range []string{"", "../escape", "a/b", "a\\b"} {
+		if _, err := StoreSSLCertOnDisk(name, &ingress.SSLCert{}); err == nil {
+			t.Errorf("expected an error storing certificate with name %q", name)
+		}
 	}
 }
 
@@ -229,7 +352,7 @@ fUNCdMGmr8FVF6IzTNYGmCuk/C4=
 		t.Fatalf("unexpected error creating CRL file: %v", err)
 	}
 
-	crlFilename := fmt.Sprintf("%v/crl-%v.pem", file.DefaultSSLDirectory, cn)
+	crlFilename := fmt.Sprintf("%v/crl_%v.pem", file.DefaultSSLDirectory, cn)
 	if sslCert.CRLFileName != crlFilename {
 		t.Fatalf("expected a valid CRL file name")
 	}

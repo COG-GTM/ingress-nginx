@@ -17,8 +17,13 @@ limitations under the License.
 package store
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"sync"
@@ -34,11 +39,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	certutil "k8s.io/client-go/util/cert"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"k8s.io/ingress-nginx/internal/ingress/annotations/parser"
 	"k8s.io/ingress-nginx/internal/ingress/controller/ingressclass"
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
+	"k8s.io/ingress-nginx/pkg/util/file"
 	"k8s.io/ingress-nginx/test/e2e/framework"
 )
 
@@ -1646,5 +1653,71 @@ func TestWriteSSLSessionTicketKey(t *testing.T) {
 		if test != encodedContent {
 			t.Fatalf("expected %v but returned %s", test, encodedContent)
 		}
+	}
+}
+
+func newTestCAPEM(t *testing.T, cn string) []byte {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("unexpected error generating key: %v", err)
+	}
+	cert, err := certutil.NewSelfSignedCACert(certutil.Config{CommonName: cn}, key)
+	if err != nil {
+		t.Fatalf("unexpected error generating CA: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: certutil.CertificateBlockType, Bytes: cert.Raw})
+}
+
+func TestGetPemCertificateCrossNamespaceSecretsDoNotShareFiles(t *testing.T) {
+	if err := os.MkdirAll(file.DefaultSSLDirectory, 0o755); err != nil {
+		t.Skipf("cannot create %v: %v", file.DefaultSSLDirectory, err)
+	}
+
+	s := newStore()
+	s.listers.Secret = SecretLister{cache.NewStore(cache.MetaNamespaceKeyFunc)}
+
+	addCASecret := func(namespace, name string, ca []byte) {
+		err := s.listers.Secret.Update(&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+			Data:       map[string][]byte{"ca.crt": ca},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error adding secret: %v", err)
+		}
+	}
+
+	victimCA := newTestCAPEM(t, "victim")
+	addCASecret("team", "alpha-ca", victimCA)
+	victim, err := s.getPemCertificate("team/alpha-ca")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	addCASecret("team-alpha", "ca", newTestCAPEM(t, "attacker"))
+	attacker, err := s.getPemCertificate("team-alpha/ca")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if victim.CAFileName == attacker.CAFileName {
+		t.Fatalf("Secrets team/alpha-ca and team-alpha/ca share CA file %v", victim.CAFileName)
+	}
+
+	addCASecret("team-alpha", "ca", newTestCAPEM(t, "attacker-rotated"))
+	if _, err := s.getPemCertificate("team-alpha/ca"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, err := os.ReadFile(victim.CAFileName)
+	if err != nil {
+		t.Fatalf("unexpected error reading %v: %v", victim.CAFileName, err)
+	}
+	if !bytes.Equal(content, victimCA) {
+		t.Fatalf("CA file %v of team/alpha-ca was overwritten", victim.CAFileName)
+	}
+	if sha := file.SHA1(victim.CAFileName); sha != victim.CASHA {
+		t.Fatalf("expected SHA %v for %v but got %v", victim.CASHA, victim.CAFileName, sha)
 	}
 }

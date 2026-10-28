@@ -579,12 +579,15 @@ func (n *NGINXController) generateTemplate(cfg ngx_config.Configuration, ingress
 		if err != nil {
 			klog.Warningf("Error reading Secret %q from local store: %v", secretName, err)
 		} else {
-			nsSecName := strings.ReplaceAll(secretName, "/", "-")
 			dh, ok := secret.Data["dhparam.pem"]
 			if ok {
-				pemFileName, err := ssl.AddOrUpdateDHParam(nsSecName, dh)
+				nsSecName, err := ssl.SecretFileName(secretName)
+				var pemFileName string
+				if err == nil {
+					pemFileName, err = ssl.AddOrUpdateDHParam(nsSecName, dh)
+				}
 				if err != nil {
-					klog.Warningf("Error adding or updating dhparam file %v: %v", nsSecName, err)
+					klog.Warningf("Error adding or updating dhparam file for Secret %v: %v", secretName, err)
 				} else {
 					sslDHParam = pemFileName
 				}

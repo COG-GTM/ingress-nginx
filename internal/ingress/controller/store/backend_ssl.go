@@ -18,7 +18,6 @@ package store
 
 import (
 	"fmt"
-	"strings"
 
 	apiv1 "k8s.io/api/core/v1"
 	networking "k8s.io/api/networking/v1"
@@ -87,8 +86,10 @@ func (s *k8sStore) getPemCertificate(secretName string) (*ingress.SSLCert, error
 
 	auth := secret.Data["auth"]
 
-	// namespace/secretName -> namespace-secretName
-	nsSecName := strings.ReplaceAll(secretName, "/", "-")
+	nsSecName, err := ssl.SecretFileName(secretName)
+	if err != nil {
+		return nil, err
+	}
 
 	var sslCert *ingress.SSLCert
 	switch {

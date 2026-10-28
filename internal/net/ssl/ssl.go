@@ -39,6 +39,7 @@ import (
 
 	"github.com/zakjan/cert-chain-resolver/certUtil"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
 
@@ -58,10 +59,41 @@ const (
 	fakeCertificateName = "default-fake-certificate" //#nosec G101
 )
 
+// File name prefixes for the different kinds of material stored in
+// file.DefaultSSLDirectory. They contain '_', which Kubernetes namespace and
+// Secret names cannot, so they never collide with a SecretFileName.
+const (
+	caFilePrefix      = "ca_"
+	crlFilePrefix     = "crl_"
+	dhParamFilePrefix = "dhparam_"
+)
+
+// SecretFileName maps a Secret key ("namespace/name") to the base name used
+// for its files in file.DefaultSSLDirectory. Namespaces are DNS-1123 labels and
+// Secret names DNS-1123 subdomains, so neither can contain '_' and the result
+// "namespace_name" is unique per Secret and can never equal the generated fake
+// certificate name.
+func SecretFileName(key string) (string, error) {
+	namespace, name, found := strings.Cut(key, "/")
+	if !found {
+		return "", fmt.Errorf("invalid secret key %q: expected namespace/name", key)
+	}
+	if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+		return "", fmt.Errorf("invalid namespace in secret key %q: %v", key, strings.Join(errs, ", "))
+	}
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return "", fmt.Errorf("invalid name in secret key %q: %v", key, strings.Join(errs, ", "))
+	}
+	return namespace + "_" + name, nil
+}
+
 // getPemFileName returns absolute file path and file name of pem cert related to given fullSecretName
-func getPemFileName(fullSecretName string) (filePath, pemName string) {
+func getPemFileName(fullSecretName string) (filePath, pemName string, err error) {
+	if fullSecretName == "" || strings.ContainsAny(fullSecretName, "/\\") || strings.Contains(fullSecretName, "..") {
+		return "", "", fmt.Errorf("invalid file name %q", fullSecretName)
+	}
 	pemName = fmt.Sprintf("%v.pem", fullSecretName)
-	return fmt.Sprintf("%v/%v", file.DefaultSSLDirectory, pemName), pemName
+	return fmt.Sprintf("%v/%v", file.DefaultSSLDirectory, pemName), pemName, nil
 }
 
 // CreateSSLCert validates cert and key, extracts common names and returns corresponding SSLCert object
@@ -178,9 +210,12 @@ func CheckCACert(caBytes []byte) ([]*x509.Certificate, error) {
 // StoreSSLCertOnDisk creates a .pem file with content PemCertKey from the given sslCert
 // and sets relevant remaining fields of sslCert object
 func StoreSSLCertOnDisk(name string, sslCert *ingress.SSLCert) (string, error) {
-	pemFileName, _ := getPemFileName(name)
+	pemFileName, _, err := getPemFileName(name)
+	if err != nil {
+		return "", err
+	}
 
-	err := os.WriteFile(pemFileName, []byte(sslCert.PemCertKey), file.ReadWriteByUser)
+	err = os.WriteFile(pemFileName, []byte(sslCert.PemCertKey), file.ReadWriteByUser)
 	if err != nil {
 		return "", fmt.Errorf("could not create PEM certificate file %v: %v", pemFileName, err)
 	}
@@ -214,8 +249,10 @@ func ConfigureCACertWithCertAndKey(_ string, ca []byte, sslCert *ingress.SSLCert
 
 // ConfigureCRL creates a CRL file and append it into the SSLCert
 func ConfigureCRL(name string, crl []byte, sslCert *ingress.SSLCert) error {
-	crlName := fmt.Sprintf("crl-%v.pem", name)
-	crlFileName := fmt.Sprintf("%v/%v", file.DefaultSSLDirectory, crlName)
+	crlFileName, _, err := getPemFileName(crlFilePrefix + name)
+	if err != nil {
+		return err
+	}
 
 	pemCRLBlock, _ := pem.Decode(crl)
 	if pemCRLBlock == nil {
@@ -226,7 +263,7 @@ func ConfigureCRL(name string, crl []byte, sslCert *ingress.SSLCert) error {
 		return fmt.Errorf("CRL file %v contains invalid data, and must be created only with PEM formatted certificates", name)
 	}
 
-	_, err := x509.ParseRevocationList(pemCRLBlock.Bytes)
+	_, err = x509.ParseRevocationList(pemCRLBlock.Bytes)
 	if err != nil {
 		return err
 	}
@@ -246,11 +283,13 @@ func ConfigureCRL(name string, crl []byte, sslCert *ingress.SSLCert) error {
 // ConfigureCACert is similar to ConfigureCACertWithCertAndKey but it creates a separate file
 // for CA cert and writes only ca into it and then sets relevant fields in sslCert
 func ConfigureCACert(name string, ca []byte, sslCert *ingress.SSLCert) error {
-	caName := fmt.Sprintf("ca-%v.pem", name)
-	fileName := fmt.Sprintf("%v/%v", file.DefaultSSLDirectory, caName)
+	fileName, _, err := getPemFileName(caFilePrefix + name)
+	if err != nil {
+		return err
+	}
 
 	//nolint:gosec // Not change permission to avoid possible issues
-	err := os.WriteFile(fileName, ca, 0o644)
+	err = os.WriteFile(fileName, ca, 0o644)
 	if err != nil {
 		return fmt.Errorf("could not write CA file %v: %v", fileName, err)
 	}
@@ -330,14 +369,17 @@ func parseSANExtension(value []byte) (dnsNames, emailAddresses []string, ipAddre
 
 // AddOrUpdateDHParam creates a dh parameters file with the specified name
 func AddOrUpdateDHParam(name string, dh []byte) (string, error) {
-	pemFileName, pemName := getPemFileName(name)
+	pemFileName, pemName, err := getPemFileName(dhParamFilePrefix + name)
+	if err != nil {
+		return "", err
+	}
 
-	tempPemFile, err := os.CreateTemp(file.DefaultSSLDirectory, pemName)
-
-	klog.V(3).InfoS("Creating temporal file for DH", "path", tempPemFile.Name(), "name", pemName)
+	tempPemFile, err := os.CreateTemp(file.DefaultSSLDirectory, "dhparam-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("could not create temp pem file %v: %v", pemFileName, err)
 	}
+
+	klog.V(3).InfoS("Creating temporal file for DH", "path", tempPemFile.Name(), "name", pemName)
 
 	_, err = tempPemFile.Write(dh)
 	if err != nil {

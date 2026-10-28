@@ -200,10 +200,10 @@ var _ = framework.DescribeAnnotation("proxy-ssl-*", func() {
 })
 
 func assertProxySSL(f *framework.Framework, host, sslName, ciphers, protocols, verify string, depth int, proxySSLServerName string) {
-	certFile := fmt.Sprintf("/etc/ingress-controller/ssl/%s-%s.pem", f.Namespace, host)
+	certFile := fmt.Sprintf("/etc/ingress-controller/ssl/%s_%s.pem", f.Namespace, host)
 
 	if sslName != "" {
-		certFile = fmt.Sprintf("/etc/ingress-controller/ssl/%s-%s.pem", f.Namespace, sslName)
+		certFile = fmt.Sprintf("/etc/ingress-controller/ssl/%s_%s.pem", f.Namespace, sslName)
 	}
 
 	f.WaitForNginxServer(host,
