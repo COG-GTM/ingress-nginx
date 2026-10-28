@@ -165,7 +165,9 @@ Requires the update-status parameter.`)
 		enableSSLChainCompletion = flags.Bool("enable-ssl-chain-completion", false,
 			`Autocomplete SSL certificate chains with missing intermediate CA certificates.
 Certificates uploaded to Kubernetes must have the "Authority Information Access" X.509 v3
-extension for this to succeed.`)
+extension for this to succeed. Issuer certificates are only downloaded over http/https from
+public IP addresses (no proxy, no private, loopback or link-local destinations), with at most
+5 issuer hops per certificate.`)
 
 		syncRateLimit = flags.Float32("sync-rate-limit", 0.3,
 			`Define the sync frequency upper limit`)

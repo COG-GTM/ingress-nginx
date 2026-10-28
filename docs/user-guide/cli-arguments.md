@@ -25,7 +25,7 @@ They are set in the container spec of the `ingress-nginx-controller` Deployment 
 | `--election-id`                    | Election id to use for Ingress status updates. (default "ingress-controller-leader") |
 | `--election-ttl`                  | Duration a leader election is valid before it's getting re-elected, e.g. `15s`, `10m` or `1h`. (Default: 30s) |
 | `--enable-metrics`                 | Enables the collection of NGINX metrics. (Default: false) |
-| `--enable-ssl-chain-completion`    | Autocomplete SSL certificate chains with missing intermediate CA certificates. Certificates uploaded to Kubernetes must have the "Authority Information Access" X.509 v3 extension for this to succeed. (default false)|
+| `--enable-ssl-chain-completion`    | Autocomplete SSL certificate chains with missing intermediate CA certificates. Certificates uploaded to Kubernetes must have the "Authority Information Access" X.509 v3 extension for this to succeed. Issuer certificates are only downloaded over http/https from public IP addresses (no proxy, no private, loopback or link-local destinations), with at most 5 issuer hops per certificate. Because the issuer URL comes from the uploaded certificate, enabling this lets anyone who can create TLS Secrets trigger outbound requests from the controller. (default false)|
 | `--enable-ssl-passthrough`         | Enable SSL Passthrough. (default false) |
 | `--disable-leader-election`        | Disable Leader Election on Nginx Controller. (default false) |
 | `--enable-topology-aware-routing`  | Enable topology aware routing feature, needs service object annotation service.kubernetes.io/topology-mode sets to auto. (default false) |

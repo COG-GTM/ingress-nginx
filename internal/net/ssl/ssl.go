@@ -73,7 +73,7 @@ func CreateSSLCert(cert, key []byte, uid string) (*ingress.SSLCert, error) {
 		data, err := fullChainCert(cert)
 		if err != nil {
 			klog.ErrorS(err, "Error generating certificate chain for Secret")
-		} else {
+		} else if len(data) > 0 {
 			pemCertBuffer.Reset()
 			pemCertBuffer.Write(data)
 		}
@@ -459,7 +459,7 @@ func fullChainCert(in []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	certs, err := certUtil.FetchCertificateChain(cert)
+	certs, err := fetchCertificateChain(cert)
 	if err != nil {
 		return nil, err
 	}
