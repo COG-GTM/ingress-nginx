@@ -2812,8 +2812,8 @@ func TestCheckIngressRejectsOverlappingServerAlias(t *testing.T) {
 		t.Errorf("server-alias on a host shared with another ingress: expected overlap error, got %v", err)
 	}
 
-	canary := aliasTestIngress("shop", "app-canary", "app.acme.example", nil).Ingress
-	canary.Annotations = map[string]string{
+	canaryIng := aliasTestIngress("shop", "app-canary", "app.acme.example", nil).Ingress
+	canaryIng.Annotations = map[string]string{
 		"kubernetes.io/ingress.class":                  "nginx",
 		parser.GetAnnotationWithPrefix("canary"):       "true",
 		parser.GetAnnotationWithPrefix("server-alias"): ".wild.example",
@@ -2822,7 +2822,7 @@ func TestCheckIngressRejectsOverlappingServerAlias(t *testing.T) {
 		t:        t,
 		expected: "*.wild.example,_,app.acme.example",
 	}
-	if err := nginx.CheckIngress(&canary); err != nil {
+	if err := nginx.CheckIngress(&canaryIng); err != nil {
 		t.Errorf("canary ingress aliases are ignored and should not block admission, got %v", err)
 	}
 }
