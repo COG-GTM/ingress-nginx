@@ -1902,7 +1902,8 @@ func checkAliasOverlap(ing *networking.Ingress, aliases []string, servers []*ing
 				owner = "another ingress"
 			}
 
-			if normalizeServerName(alias) == server.Hostname || !aliasConflictsWithHost(alias, server.Hostname) {
+			ownAlias := ownHosts.Has(server.Hostname) && normalizeServerName(alias) == server.Hostname
+			if ownAlias || !aliasConflictsWithHost(alias, server.Hostname) {
 				continue
 			}
 

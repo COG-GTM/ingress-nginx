@@ -2774,7 +2774,7 @@ func TestCheckIngressRejectsOverlappingServerAlias(t *testing.T) {
 		},
 	}
 
-	for _, alias := range []string{"App.acme.example", ".acme.example", "*.Victim.example,*.Acme.example", ".wild.example", "x.wild.example"} {
+	for _, alias := range []string{"App.acme.example", ".acme.example", "*.Victim.example,*.Acme.example", ".wild.example", "x.wild.example", "*.Wild.example"} {
 		attacker := aliasTestIngress("sandbox", "mallory", "*.sandbox.example", nil).Ingress
 		attacker.Annotations = map[string]string{
 			"kubernetes.io/ingress.class":                  "nginx",
