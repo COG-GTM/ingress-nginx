@@ -17,8 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"errors"
 	"io"
 	"net/http"
+	goruntime "runtime"
+	"sync"
+	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,11 +44,68 @@ type AdmissionController interface {
 	HandleAdmission(runtime.Object) (runtime.Object, error)
 }
 
+const (
+	// MaxRequestBodyBytes caps the size of an AdmissionReview request body.
+	// An AdmissionReview carries the object (at most 3MiB, the API server's
+	// request body limit) and the old object (at most 1.5MiB in etcd), and JSON
+	// encoding can expand a string by up to 6x (e.g. "<" becomes "\u003c").
+	MaxRequestBodyBytes int64 = 32 << 20
+
+	// MaxInFlightBodyBytes caps the total size of request bodies held in
+	// memory at the same time; further requests are rejected with 429.
+	// Bodies without a Content-Length reserve MaxRequestBodyBytes.
+	MaxInFlightBodyBytes int64 = 2 * MaxRequestBodyBytes
+
+	// MaxInFlightRequests caps the number of requests being read, decoded or
+	// queued at the same time; further requests are rejected with 429.
+	MaxInFlightRequests = 32
+
+	// minConcurrentAdmissions is the lower bound for the number of admission
+	// checks (config render and nginx -t) allowed to run at the same time.
+	minConcurrentAdmissions = 2
+
+	// AdmissionQueueTimeout is how long a request may wait for an admission
+	// slot before it is rejected with 429.
+	AdmissionQueueTimeout = 10 * time.Second
+)
+
 // AdmissionControllerServer implements an HTTP server
 // for kubernetes validating webhook
 // https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#validatingadmissionwebhook
 type AdmissionControllerServer struct {
 	AdmissionController AdmissionController
+
+	maxRequestBodyBytes int64
+	queueTimeout        time.Duration
+	inFlight            chan struct{}
+	bodyBytes           *byteBudget
+	admissions          chan struct{}
+}
+
+// byteBudget is a non-blocking counting semaphore over a number of bytes.
+type byteBudget struct {
+	mu        sync.Mutex
+	available int64
+}
+
+func newByteBudget(n int64) *byteBudget {
+	return &byteBudget{available: n}
+}
+
+func (b *byteBudget) tryAcquire(n int64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n > b.available {
+		return false
+	}
+	b.available -= n
+	return true
+}
+
+func (b *byteBudget) release(n int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.available += n
 }
 
 // NewAdmissionControllerServer instantiates an admission controller server with
@@ -52,15 +113,63 @@ type AdmissionControllerServer struct {
 func NewAdmissionControllerServer(ac AdmissionController) *AdmissionControllerServer {
 	return &AdmissionControllerServer{
 		AdmissionController: ac,
+		maxRequestBodyBytes: MaxRequestBodyBytes,
+		queueTimeout:        AdmissionQueueTimeout,
+		inFlight:            make(chan struct{}, MaxInFlightRequests),
+		bodyBytes:           newByteBudget(MaxInFlightBodyBytes),
+		admissions:          make(chan struct{}, maxConcurrentAdmissions()),
 	}
+}
+
+// maxConcurrentAdmissions caps concurrent admission checks to the CPUs
+// available to the controller; further requests queue.
+func maxConcurrentAdmissions() int {
+	return max(goruntime.GOMAXPROCS(0), minConcurrentAdmissions)
+}
+
+func tooManyRequests(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(http.StatusTooManyRequests)
 }
 
 // ServeHTTP implements http.Server method
 func (acs *AdmissionControllerServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer req.Body.Close()
 
-	data, err := io.ReadAll(req.Body)
+	select {
+	case acs.inFlight <- struct{}{}:
+		defer func() { <-acs.inFlight }()
+	default:
+		klog.Warning("Rejecting admission request: too many requests in flight")
+		tooManyRequests(w)
+		return
+	}
+
+	if req.ContentLength > acs.maxRequestBodyBytes {
+		klog.Warningf("Rejecting admission request: body of %d bytes exceeds limit of %d bytes", req.ContentLength, acs.maxRequestBodyBytes)
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	reserved := acs.maxRequestBodyBytes
+	if req.ContentLength >= 0 {
+		reserved = req.ContentLength
+	}
+	if !acs.bodyBytes.tryAcquire(reserved) {
+		klog.Warning("Rejecting admission request: too many request body bytes in flight")
+		tooManyRequests(w)
+		return
+	}
+	defer acs.bodyBytes.release(reserved)
+
+	data, err := io.ReadAll(http.MaxBytesReader(w, req.Body, acs.maxRequestBodyBytes))
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			klog.Warningf("Rejecting admission request: body exceeds limit of %d bytes", acs.maxRequestBodyBytes)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
 		klog.ErrorS(err, "Failed to read request body")
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -74,6 +183,20 @@ func (acs *AdmissionControllerServer) ServeHTTP(w http.ResponseWriter, req *http
 	if err != nil {
 		klog.ErrorS(err, "Failed to decode request body")
 		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	timer := time.NewTimer(acs.queueTimeout)
+	defer timer.Stop()
+	select {
+	case acs.admissions <- struct{}{}:
+		defer func() { <-acs.admissions }()
+	case <-timer.C:
+		klog.Warning("Rejecting admission request: timed out waiting for an admission slot")
+		tooManyRequests(w)
+		return
+	case <-req.Context().Done():
+		klog.Warning("Admission request canceled while waiting for an admission slot")
 		return
 	}
 
