@@ -19,6 +19,8 @@ package ssl
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -483,4 +485,164 @@ func TestTLSKeyReloader(t *testing.T) {
 		})
 		*/
 	})
+}
+
+func newTestCA(t *testing.T, cn string) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: cn},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+func newTestClientCert(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, cn string) tls.Certificate {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func TestTLSListenerWithClientCA(t *testing.T) {
+	serverCert, certFile, keyFile := newFakeCertificate(t)
+	defer os.Remove(certFile)
+	defer os.Remove(keyFile)
+
+	ca, caKey, caPEM := newTestCA(t, "webhook-client-ca")
+	clientCAFile, err := os.CreateTemp("", "client-ca-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(clientCAFile.Name())
+	if _, err := clientCAFile.Write(caPEM); err != nil {
+		t.Fatal(err)
+	}
+	clientCAFile.Close()
+
+	listener := TLSListener{certificatePath: certFile, keyPath: keyFile, clientCAPath: clientCAFile.Name()}
+	listener.load()
+	listener.loadClientCA()
+
+	cfg := listener.TLSConfig()
+	if cfg.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("expected ClientAuth RequireAndVerifyClientCert, got %v", cfg.ClientAuth)
+	}
+
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	s.Config.TLSConfig = cfg
+	s.Listener = tls.NewListener(s.Listener, cfg)
+	go s.Start()
+	defer s.Close()
+	url := "https://localhost:" + strings.Split(s.Listener.Addr().String(), ":")[1]
+
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(serverCert)
+	post := func(clientCerts ...tls.Certificate) error {
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs:      roots,
+			Certificates: clientCerts,
+			MinVersion:   tls.VersionTLS12,
+		}}}
+		resp, err := client.Post(url, "application/json", strings.NewReader("{}"))
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		}
+		return nil
+	}
+
+	t.Run("without a client certificate", func(t *testing.T) {
+		if post() == nil {
+			t.Errorf("request without a client certificate should be rejected")
+		}
+	})
+
+	t.Run("with a client certificate from an untrusted CA", func(t *testing.T) {
+		otherCA, otherKey, _ := newTestCA(t, "attacker-ca")
+		if post(newTestClientCert(t, otherCA, otherKey, "kube-apiserver")) == nil {
+			t.Errorf("request with an untrusted client certificate should be rejected")
+		}
+	})
+
+	t.Run("with a client certificate signed by the client CA", func(t *testing.T) {
+		if err := post(newTestClientCert(t, ca, caKey, "kube-apiserver")); err != nil {
+			t.Errorf("request with a trusted client certificate should succeed: %v", err)
+		}
+	})
+
+	t.Run("when the client CA cannot be loaded", func(t *testing.T) {
+		if err := os.WriteFile(clientCAFile.Name(), []byte("not a certificate"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		listener.loadClientCA()
+		if post(newTestClientCert(t, ca, caKey, "kube-apiserver")) == nil {
+			t.Errorf("requests should be rejected while the client CA is invalid")
+		}
+	})
+}
+
+func TestTLSListenerClientCAAddedAfterStartup(t *testing.T) {
+	dir := t.TempDir()
+	clientCAPath := dir + "/ca.crt"
+	_, _, caPEM := newTestCA(t, "webhook-client-ca")
+
+	listener := &TLSListener{clientCAPath: clientCAPath}
+	listener.loadClientCA()
+	if _, err := listener.getConfigForClient(nil); err == nil {
+		t.Fatalf("expected handshakes to be rejected while the client CA is missing")
+	}
+
+	go listener.watchClientCAWhenAvailable(10 * time.Millisecond)
+	if err := os.WriteFile(clientCAPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		cfg, err := listener.getConfigForClient(nil)
+		if err == nil {
+			if cfg.ClientAuth != tls.RequireAndVerifyClientCert || cfg.ClientCAs == nil {
+				t.Fatalf("unexpected TLS config %+v", cfg)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("client CA added after startup was not loaded: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

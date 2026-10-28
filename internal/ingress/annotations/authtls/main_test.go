@@ -348,3 +348,18 @@ func TestEquals(t *testing.T) {
 		t.Errorf("Expected true")
 	}
 }
+
+func TestMatchCNInjectionRejectedWithoutAnnotationValidation(t *testing.T) {
+	defer func() { parser.EnableAnnotationValidation = true }()
+	parser.EnableAnnotationValidation = false
+
+	ing := buildIngress()
+	ing.SetAnnotations(map[string]string{
+		parser.GetAnnotationWithPrefix(annotationAuthTLSSecret):  defaultDemoSecret,
+		parser.GetAnnotationWithPrefix(annotationAuthTLSMatchCN): "CN=a #(\n){}\n}\nssl_engine x;",
+	})
+
+	if _, err := NewParser(&mockSecret{}).Parse(ing); err == nil {
+		t.Errorf("expected an error for an auth-tls-match-cn value with NGINX directives")
+	}
+}

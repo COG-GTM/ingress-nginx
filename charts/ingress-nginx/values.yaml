@@ -740,6 +740,27 @@ controller:
     port: 8443
     certificate: "/usr/local/certificates/cert"
     key: "/usr/local/certificates/key"
+    # -- Require the Kubernetes API server to authenticate to the admission webhook with a client certificate (mTLS).
+    # Without it, anyone who can reach the webhook port can submit AdmissionReviews to the controller.
+    # The API server must be configured to present a client certificate to this webhook through an
+    # AdmissionConfiguration kubeConfigFile (see https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#authenticate-apiservers).
+    clientAuth:
+      # -- Enable client certificate verification on the admission webhook.
+      enabled: false
+      # -- Name of a Secret in the release namespace holding the CA bundle that signs the API server's webhook client certificate.
+      caSecret: ""
+      # -- Name of a ConfigMap in the release namespace holding the CA bundle. Used when caSecret is empty.
+      caConfigMap: ""
+      # -- Key in the Secret or ConfigMap that holds the PEM CA bundle.
+      caKey: ca.crt
+      # -- Directory the CA bundle is mounted to inside the controller container.
+      mountPath: /usr/local/certificates/client-ca
+      # -- Common Names or DNS SANs accepted on the client certificate. If empty, any certificate signed by the CA is accepted.
+      allowedClientNames: []
+    # -- Sources allowed to reach the admission webhook port when `controller.networkPolicy.enabled` is true,
+    # as a list of NetworkPolicyPeer objects. Set it to the address range of the Kubernetes API server
+    # (e.g. `[{ipBlock: {cidr: 10.0.0.0/24}}]`) so other pods cannot reach the webhook. If empty, any source is allowed.
+    networkPolicyAllowedSources: []
     namespaceSelector: {}
     objectSelector: {}
     # -- Labels to be added to admission webhooks

@@ -28,10 +28,6 @@ spec:
         - protocol: TCP
           port: {{ .Values.controller.metrics.port }}
       {{- end }}
-      {{- if .Values.controller.admissionWebhooks.enabled }}
-        - protocol: TCP
-          port: {{ .Values.controller.admissionWebhooks.port }}
-      {{- end }}
       {{- range $key, $value := .Values.tcp }}
         - protocol: TCP
           port: {{ $key }}
@@ -40,6 +36,15 @@ spec:
         - protocol: UDP
           port: {{ $key }}
       {{- end }}
+  {{- if .Values.controller.admissionWebhooks.enabled }}
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.controller.admissionWebhooks.port }}
+      {{- with .Values.controller.admissionWebhooks.networkPolicyAllowedSources }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- end }}
   egress:
     - {}
 {{- end }}

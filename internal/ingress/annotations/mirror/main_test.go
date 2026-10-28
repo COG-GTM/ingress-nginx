@@ -124,3 +124,23 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestParseInvalidUID(t *testing.T) {
+	ing := &networking.Ingress{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      "foo",
+			Namespace: api.NamespaceDefault,
+			UID:       "x;\n}\nssl_engine y;\n",
+			Annotations: map[string]string{
+				parser.GetAnnotationWithPrefix(mirrorTargetAnnotation): "https://test.env.com/$request_uri",
+			},
+		},
+	}
+	result, err := NewParser(&resolver.Mock{}).Parse(ing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result, &Config{}) {
+		t.Errorf("expected empty mirror config for an invalid UID, got %+v", result)
+	}
+}

@@ -215,3 +215,43 @@ tests:
       - equal:
           path: spec.progressDeadlineSeconds
           value: 111
+
+  - it: should create a Deployment with webhook client certificate verification if `controller.admissionWebhooks.clientAuth.enabled` is true
+    set:
+      controller.admissionWebhooks.clientAuth.enabled: true
+      controller.admissionWebhooks.clientAuth.caSecret: apiserver-webhook-client-ca
+      controller.admissionWebhooks.clientAuth.allowedClientNames:
+        - kube-apiserver-webhook-client
+        - apiserver.example.com
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --validating-webhook-client-ca=/usr/local/certificates/client-ca/ca.crt
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --validating-webhook-allowed-client-names=kube-apiserver-webhook-client,apiserver.example.com
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: webhook-client-ca
+            mountPath: /usr/local/certificates/client-ca
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: webhook-client-ca
+            secret:
+              secretName: apiserver-webhook-client-ca
+
+  - it: should fail if `controller.admissionWebhooks.clientAuth.enabled` is true without a CA source
+    set:
+      controller.admissionWebhooks.clientAuth.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: controller.admissionWebhooks.clientAuth.enabled requires clientAuth.caSecret or clientAuth.caConfigMap
+
+  - it: should not pass a webhook client CA by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --validating-webhook-client-ca=/usr/local/certificates/client-ca/ca.crt

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -209,6 +210,12 @@ Takes the form "<host>:port". If not provided, no admission controller is starte
 			`The path of the validating webhook certificate PEM.`)
 		validationWebhookKey = flags.String("validating-webhook-key", "",
 			`The path of the validating webhook key PEM.`)
+		validationWebhookClientCA = flags.String("validating-webhook-client-ca", "",
+			`The path of a PEM bundle with the CA certificates that sign the client certificate the Kubernetes API server
+presents to the validating webhook. When set, the webhook requires and verifies a client certificate on every connection.`)
+		validationWebhookAllowedClientNames = flags.String("validating-webhook-allowed-client-names", "",
+			`Comma-separated list of Common Names or DNS SANs accepted on the validating webhook client certificate.
+Requires --validating-webhook-client-ca. If empty, any certificate signed by the client CA is accepted.`)
 		disableFullValidationTest = flags.Bool("disable-full-test", false,
 			`Disable full test of all merged ingresses at the admission stage and tests the template of the ingress being created or updated  (full test of all ingresses is enabled by default).`)
 
@@ -260,6 +267,15 @@ https://blog.maxmind.com/2019/12/significant-changes-to-accessing-and-using-geol
 		status.UpdateInterval = 5
 	} else {
 		status.UpdateInterval = *statusUpdateInterval
+	}
+
+	if *validationWebhookAllowedClientNames != "" && *validationWebhookClientCA == "" {
+		return false, nil, fmt.Errorf("flag --validating-webhook-allowed-client-names requires --validating-webhook-client-ca")
+	}
+
+	if *validationWebhook != "" && *validationWebhookClientCA == "" {
+		klog.Warning("The validating webhook does not authenticate its callers. Set --validating-webhook-client-ca " +
+			"and restrict access to the webhook port with a NetworkPolicy so only the Kubernetes API server can reach it")
 	}
 
 	parser.AnnotationsPrefix = *annotationsPrefix
@@ -390,12 +406,14 @@ https://blog.maxmind.com/2019/12/significant-changes-to-accessing-and-using-geol
 			WatchWithoutClass:  *watchWithoutClass,
 			IngressClassByName: *ingressClassByName,
 		},
-		DisableCatchAll:           *disableCatchAll,
-		ValidationWebhook:         *validationWebhook,
-		ValidationWebhookCertPath: *validationWebhookCert,
-		ValidationWebhookKeyPath:  *validationWebhookKey,
-		InternalLoggerAddress:     *internalLoggerAddress,
-		DisableSyncEvents:         *disableSyncEvents,
+		DisableCatchAll:                     *disableCatchAll,
+		ValidationWebhook:                   *validationWebhook,
+		ValidationWebhookCertPath:           *validationWebhookCert,
+		ValidationWebhookKeyPath:            *validationWebhookKey,
+		ValidationWebhookClientCAPath:       *validationWebhookClientCA,
+		ValidationWebhookAllowedClientNames: splitAndTrim(*validationWebhookAllowedClientNames),
+		InternalLoggerAddress:               *internalLoggerAddress,
+		DisableSyncEvents:                   *disableSyncEvents,
 	}
 
 	if *apiserverHost != "" {
@@ -426,4 +444,14 @@ https://blog.maxmind.com/2019/12/significant-changes-to-accessing-and-using-geol
 func ResetForTesting(usage func()) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	flag.Usage = usage
+}
+
+func splitAndTrim(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

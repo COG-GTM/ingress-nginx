@@ -258,6 +258,13 @@ metadata:
 | controller.admissionWebhooks.certManager.enabled | bool | `false` |  |
 | controller.admissionWebhooks.certManager.rootCert.duration | string | `""` |  |
 | controller.admissionWebhooks.certificate | string | `"/usr/local/certificates/cert"` |  |
+| controller.admissionWebhooks.clientAuth | object | `{"allowedClientNames":[],"caConfigMap":"","caKey":"ca.crt","caSecret":"","enabled":false,"mountPath":"/usr/local/certificates/client-ca"}` | Require the Kubernetes API server to authenticate to the admission webhook with a client certificate (mTLS). Without it, anyone who can reach the webhook port can submit AdmissionReviews to the controller. The API server must be configured to present a client certificate to this webhook through an AdmissionConfiguration kubeConfigFile (see https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#authenticate-apiservers). |
+| controller.admissionWebhooks.clientAuth.allowedClientNames | list | `[]` | Common Names or DNS SANs accepted on the client certificate. If empty, any certificate signed by the CA is accepted. |
+| controller.admissionWebhooks.clientAuth.caConfigMap | string | `""` | Name of a ConfigMap in the release namespace holding the CA bundle. Used when caSecret is empty. |
+| controller.admissionWebhooks.clientAuth.caKey | string | `"ca.crt"` | Key in the Secret or ConfigMap that holds the PEM CA bundle. |
+| controller.admissionWebhooks.clientAuth.caSecret | string | `""` | Name of a Secret in the release namespace holding the CA bundle that signs the API server's webhook client certificate. |
+| controller.admissionWebhooks.clientAuth.enabled | bool | `false` | Enable client certificate verification on the admission webhook. |
+| controller.admissionWebhooks.clientAuth.mountPath | string | `"/usr/local/certificates/client-ca"` | Directory the CA bundle is mounted to inside the controller container. |
 | controller.admissionWebhooks.createSecretJob.name | string | `"create"` |  |
 | controller.admissionWebhooks.createSecretJob.resources | object | `{}` |  |
 | controller.admissionWebhooks.createSecretJob.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Security context for secret creation containers |
@@ -268,6 +275,7 @@ metadata:
 | controller.admissionWebhooks.labels | object | `{}` | Labels to be added to admission webhooks |
 | controller.admissionWebhooks.name | string | `"admission"` |  |
 | controller.admissionWebhooks.namespaceSelector | object | `{}` |  |
+| controller.admissionWebhooks.networkPolicyAllowedSources | list | `[]` | Sources allowed to reach the admission webhook port when `controller.networkPolicy.enabled` is true, as a list of NetworkPolicyPeer objects. Set it to the address range of the Kubernetes API server (e.g. `[{ipBlock: {cidr: 10.0.0.0/24}}]`) so other pods cannot reach the webhook. If empty, any source is allowed. |
 | controller.admissionWebhooks.objectSelector | object | `{}` |  |
 | controller.admissionWebhooks.patch.enabled | bool | `true` |  |
 | controller.admissionWebhooks.patch.image.digest | string | `"sha256:aaafd456bda110628b2d4ca6296f38731a3aaf0bf7581efae824a41c770a8fc4"` |  |

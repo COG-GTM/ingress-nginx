@@ -491,6 +491,9 @@ type TLSListener struct {
 	keyPath         string
 	certificate     *tls.Certificate
 	err             error
+	clientCAPath    string
+	clientCAs       *x509.CertPool
+	clientCAErr     error
 	lock            sync.Mutex
 }
 
@@ -516,6 +519,43 @@ func NewTLSListener(certificate, key string) *TLSListener {
 	return &l
 }
 
+// NewTLSListenerWithClientCA is like NewTLSListener but additionally requires every
+// client to present a certificate signed by one of the CAs in the clientCA PEM bundle.
+// The bundle is reloaded whenever the file changes. While the bundle cannot be loaded
+// all handshakes are rejected.
+func NewTLSListenerWithClientCA(certificate, key, clientCA string) *TLSListener {
+	l := NewTLSListener(certificate, key)
+	if clientCA == "" {
+		return l
+	}
+
+	l.clientCAPath = clientCA
+	l.loadClientCA()
+
+	if _, err := file.NewFileWatcher(clientCA, l.loadClientCA); err != nil {
+		klog.ErrorS(err, "failed to watch webhook client CA bundle, retrying", "path", clientCA)
+		go l.watchClientCAWhenAvailable(clientCAWatchRetryInterval)
+	}
+	return l
+}
+
+const clientCAWatchRetryInterval = 10 * time.Second
+
+// watchClientCAWhenAvailable retries loading and watching the client CA bundle until
+// the file exists, so a bundle added after startup is picked up without a restart.
+func (tl *TLSListener) watchClientCAWhenAvailable(interval time.Duration) {
+	for {
+		time.Sleep(interval)
+		if _, err := os.Stat(tl.clientCAPath); err != nil {
+			continue
+		}
+		tl.loadClientCA()
+		if _, err := file.NewFileWatcher(tl.clientCAPath, tl.loadClientCA); err == nil {
+			return
+		}
+	}
+}
+
 // GetCertificate implements the tls.Config.GetCertificate interface
 func (tl *TLSListener) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	tl.lock.Lock()
@@ -525,10 +565,50 @@ func (tl *TLSListener) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, e
 
 // TLSConfig instantiates a TLS configuration, always providing an up to date certificate
 func (tl *TLSListener) TLSConfig() *tls.Config {
-	return &tls.Config{
+	cfg := &tls.Config{
 		GetCertificate: tl.GetCertificate,
 		MinVersion:     tls.VersionTLS12,
 	}
+	if tl.clientCAPath != "" {
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		cfg.GetConfigForClient = tl.getConfigForClient
+	}
+	return cfg
+}
+
+// getConfigForClient returns a per-connection TLS configuration carrying the current
+// client CA pool, so CA rotations are picked up without restarting the listener.
+func (tl *TLSListener) getConfigForClient(*tls.ClientHelloInfo) (*tls.Config, error) {
+	tl.lock.Lock()
+	pool, err := tl.clientCAs, tl.clientCAErr
+	tl.lock.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		GetCertificate: tl.GetCertificate,
+		MinVersion:     tls.VersionTLS12,
+		ClientAuth:     tls.RequireAndVerifyClientCert,
+		ClientCAs:      pool,
+	}, nil
+}
+
+func (tl *TLSListener) loadClientCA() {
+	klog.InfoS("loading webhook client CA bundle", "path", tl.clientCAPath)
+	pool := x509.NewCertPool()
+	data, err := os.ReadFile(tl.clientCAPath)
+	if err == nil && !pool.AppendCertsFromPEM(data) {
+		err = fmt.Errorf("no valid PEM certificates found in %v", tl.clientCAPath)
+	}
+
+	tl.lock.Lock()
+	defer tl.lock.Unlock()
+	if err != nil {
+		klog.ErrorS(err, "failed to load webhook client CA bundle, rejecting all webhook connections")
+		tl.clientCAs, tl.clientCAErr = nil, err
+		return
+	}
+	tl.clientCAs, tl.clientCAErr = pool, nil
 }
 
 func (tl *TLSListener) load() {

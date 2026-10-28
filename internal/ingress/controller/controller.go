@@ -125,7 +125,10 @@ type Configuration struct {
 	ValidationWebhook         string
 	ValidationWebhookCertPath string
 	ValidationWebhookKeyPath  string
-	DisableFullValidationTest bool
+
+	ValidationWebhookClientCAPath       string
+	ValidationWebhookAllowedClientNames []string
+	DisableFullValidationTest           bool
 
 	GlobalExternalAuth  *ngx_config.GlobalExternalAuth
 	MaxmindEditionFiles *[]string
@@ -414,14 +417,17 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 		testedSize = 1
 	}
 
+	// The rendered configuration is deliberately not passed to "nginx -t" here: the
+	// admission request is untrusted input, and nginx -t loads modules and SSL engines
+	// referenced by the configuration it parses, which turns any configuration
+	// injection into code execution inside the controller.
 	content, err := n.generateTemplate(cfg, *pcfg)
 	if err != nil {
 		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
 		return err
 	}
 
-	err = n.testTemplate(content)
-	if err != nil {
+	if err := checkForbiddenDirectives(content); err != nil {
 		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
 		return err
 	}

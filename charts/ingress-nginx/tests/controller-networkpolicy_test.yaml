@@ -21,3 +21,33 @@ tests:
       - equal:
           path: metadata.name
           value: RELEASE-NAME-ingress-nginx-controller
+
+  - it: should allow any source on the webhook port if `controller.admissionWebhooks.networkPolicyAllowedSources` is empty
+    set:
+      controller.networkPolicy.enabled: true
+    asserts:
+      - equal:
+          path: spec.ingress[1].ports
+          value:
+            - protocol: TCP
+              port: 8443
+      - notExists:
+          path: spec.ingress[1].from
+
+  - it: should restrict the webhook port to `controller.admissionWebhooks.networkPolicyAllowedSources`
+    set:
+      controller.networkPolicy.enabled: true
+      controller.admissionWebhooks.networkPolicyAllowedSources:
+        - ipBlock:
+            cidr: 10.0.0.0/24
+    asserts:
+      - equal:
+          path: spec.ingress[1].from
+          value:
+            - ipBlock:
+                cidr: 10.0.0.0/24
+      - notContains:
+          path: spec.ingress[0].ports
+          content:
+            protocol: TCP
+            port: 8443

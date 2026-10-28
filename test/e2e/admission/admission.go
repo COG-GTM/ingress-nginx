@@ -99,7 +99,7 @@ var _ = framework.IngressNginxDescribeSerial("[Admission] admission controller",
 		assert.NotNil(ginkgo.GinkgoT(), err, "creating an ingress with invalid path should return an error")
 	})
 
-	ginkgo.It("should return an error if there is an error validating the ingress definition", func() {
+	ginkgo.It("should not run nginx -t on the configuration generated for the ingress definition", func() {
 		disableSnippet := f.AllowSnippetConfiguration()
 		defer disableSnippet()
 
@@ -110,7 +110,7 @@ var _ = framework.IngressNginxDescribeSerial("[Admission] admission controller",
 		}
 		firstIngress := framework.NewSingleIngress("first-ingress", "/", host, f.Namespace, framework.EchoService, 80, annotations)
 		_, err := f.KubeClientSet.NetworkingV1().Ingresses(f.Namespace).Create(context.TODO(), firstIngress, metav1.CreateOptions{})
-		assert.NotNil(ginkgo.GinkgoT(), err, "creating an ingress with invalid configuration should return an error")
+		assert.Nil(ginkgo.GinkgoT(), err, "the admission webhook must not execute nginx -t on untrusted input")
 	})
 
 	ginkgo.It("should return an error if there is an invalid value in some annotation", func() {
@@ -281,8 +281,7 @@ kind: Ingress
 metadata:
   name: extensions-invalid
   annotations:
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      invalid directive
+    nginx.ingress.kubernetes.io/connection-proxy-header: "invalid directive"
 spec:
   ingressClassName: nginx
   rules:
