@@ -56,6 +56,7 @@ import (
 	"k8s.io/ingress-nginx/internal/ingress/resolver"
 	"k8s.io/ingress-nginx/internal/k8s"
 	"k8s.io/ingress-nginx/internal/net/ssl"
+	"k8s.io/ingress-nginx/pkg/tcpproxy"
 
 	"k8s.io/ingress-nginx/pkg/util/file"
 )
@@ -2678,5 +2679,93 @@ func newDynamicNginxController(t *testing.T, setConfigMap func(string) *corev1.C
 		cfg:             config,
 		command:         NewNginxCommand(),
 		metricCollector: metric.DummyCollector{},
+	}
+}
+
+type passthroughIngressStore struct {
+	fakeIngressStore
+	service *corev1.Service
+}
+
+func (s *passthroughIngressStore) GetService(_ string) (*corev1.Service, error) {
+	return s.service, nil
+}
+
+func TestCheckIngressDoesNotChangePassthroughServers(t *testing.T) {
+	if err := file.CreateRequiredDirectories(); err != nil {
+		t.Fatal(err)
+	}
+
+	nginx := newNGINXController(t)
+	nginx.metricCollector = metric.DummyCollector{}
+	nginx.t = fakeTemplate{}
+	nginx.cfg.EnableSSLPassthrough = true
+	nginx.store = &passthroughIngressStore{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "postgres", Namespace: "payments"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.0.0.42",
+				Ports:     []corev1.ServicePort{{Name: "pg", Port: 5432}},
+			},
+		},
+	}
+
+	existing := []*tcpproxy.TCPServer{{Hostname: "legit.example.com", IP: "10.0.0.1", Port: 443}}
+	nginx.Proxy = &tcpproxy.TCPProxy{
+		ServerList: existing,
+		Default:    &tcpproxy.TCPServer{Hostname: "localhost", IP: "127.0.0.1", Port: 442},
+	}
+
+	pathType := networking.PathTypePrefix
+	ing := &networking.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "forged",
+			Namespace: "payments",
+			Annotations: map[string]string{
+				"kubernetes.io/ingress.class":                 "nginx",
+				"nginx.ingress.kubernetes.io/ssl-passthrough": "true",
+			},
+		},
+		Spec: networking.IngressSpec{
+			Rules: []networking.IngressRule{{
+				Host: "internal-db.acme.example",
+				IngressRuleValue: networking.IngressRuleValue{
+					HTTP: &networking.HTTPIngressRuleValue{
+						Paths: []networking.HTTPIngressPath{{
+							Path:     "/",
+							PathType: &pathType,
+							Backend: networking.IngressBackend{
+								Service: &networking.IngressServiceBackend{
+									Name: "postgres",
+									Port: networking.ServiceBackendPort{Number: 5432},
+								},
+							},
+						}},
+					},
+				},
+			}},
+		},
+	}
+
+	for _, disableFullTest := range []bool{false, true} {
+		nginx.cfg.DisableFullValidationTest = disableFullTest
+		for _, testErr := range []error{nil, fmt.Errorf("test error")} {
+			nginx.command = testNginxTestCommand{
+				t:        t,
+				err:      testErr,
+				expected: "_,internal-db.acme.example",
+			}
+			err := nginx.CheckIngress(ing)
+			if (err != nil) != (testErr != nil) {
+				t.Fatalf("disableFullTest=%v: unexpected CheckIngress result: %v", disableFullTest, err)
+			}
+
+			if got := nginx.Proxy.Get("internal-db.acme.example"); got != nginx.Proxy.Default {
+				t.Errorf("disableFullTest=%v testErr=%v: admission check installed passthrough route %+v", disableFullTest, testErr, got)
+			}
+			if got := nginx.Proxy.Get("legit.example.com"); got != existing[0] {
+				t.Errorf("disableFullTest=%v testErr=%v: admission check dropped existing passthrough route, got %+v", disableFullTest, testErr, got)
+			}
+		}
 	}
 }

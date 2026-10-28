@@ -451,48 +451,51 @@ func (n *NGINXController) DefaultEndpoint() ingress.Endpoint {
 	}
 }
 
+// passthroughServers computes the SSL passthrough routing table for the
+// given configuration. It has no side effects; only OnUpdate installs the
+// result in n.Proxy.
+func passthroughServers(ingressCfg *ingress.Configuration) []*tcpproxy.TCPServer {
+	servers := []*tcpproxy.TCPServer{}
+	for _, pb := range ingressCfg.PassthroughBackends {
+		svc := pb.Service
+		if svc == nil {
+			klog.Warningf("Missing Service for SSL Passthrough backend %q", pb.Backend)
+			continue
+		}
+		port, err := strconv.Atoi(pb.Port.String()) // #nosec
+		if err != nil {
+			for _, sp := range svc.Spec.Ports {
+				if sp.Name == pb.Port.String() {
+					port = int(sp.Port)
+					break
+				}
+			}
+		} else {
+			for _, sp := range svc.Spec.Ports {
+				//nolint:gosec // Ignore G109 error
+				if sp.Port == int32(port) {
+					port = int(sp.Port)
+					break
+				}
+			}
+		}
+
+		// TODO: Allow PassthroughBackends to specify they support proxy-protocol
+		servers = append(servers, &tcpproxy.TCPServer{
+			Hostname:      pb.Hostname,
+			IP:            svc.Spec.ClusterIP,
+			Port:          port,
+			ProxyProtocol: false,
+		})
+	}
+
+	return servers
+}
+
 // generateTemplate returns the nginx configuration file content
 //
 //nolint:gocritic // the cfg shouldn't be changed, and shouldn't be mutated by other processes while being rendered.
 func (n *NGINXController) generateTemplate(cfg ngx_config.Configuration, ingressCfg ingress.Configuration) ([]byte, error) {
-	if n.cfg.EnableSSLPassthrough {
-		servers := []*tcpproxy.TCPServer{}
-		for _, pb := range ingressCfg.PassthroughBackends {
-			svc := pb.Service
-			if svc == nil {
-				klog.Warningf("Missing Service for SSL Passthrough backend %q", pb.Backend)
-				continue
-			}
-			port, err := strconv.Atoi(pb.Port.String()) // #nosec
-			if err != nil {
-				for _, sp := range svc.Spec.Ports {
-					if sp.Name == pb.Port.String() {
-						port = int(sp.Port)
-						break
-					}
-				}
-			} else {
-				for _, sp := range svc.Spec.Ports {
-					//nolint:gosec // Ignore G109 error
-					if sp.Port == int32(port) {
-						port = int(sp.Port)
-						break
-					}
-				}
-			}
-
-			// TODO: Allow PassthroughBackends to specify they support proxy-protocol
-			servers = append(servers, &tcpproxy.TCPServer{
-				Hostname:      pb.Hostname,
-				IP:            svc.Spec.ClusterIP,
-				Port:          port,
-				ProxyProtocol: false,
-			})
-		}
-
-		n.Proxy.ServerList = servers
-	}
-
 	// NGINX cannot resize the hash tables used to store server names. For
 	// this reason we check if the current size is correct for the host
 	// names defined in the Ingress rules and adjust the value if
@@ -701,6 +704,10 @@ func (n *NGINXController) OnUpdate(ingressCfg ingress.Configuration) error {
 	err = n.testTemplate(content)
 	if err != nil {
 		return err
+	}
+
+	if n.cfg.EnableSSLPassthrough {
+		n.Proxy.SetServerList(passthroughServers(&ingressCfg))
 	}
 
 	if klog.V(2).Enabled() {

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 
 	"k8s.io/klog/v2"
 
@@ -35,13 +36,26 @@ type TCPServer struct {
 }
 
 // TCPProxy describes the passthrough servers and a default as catch all.
+// ServerList is read concurrently by connection handlers; replace it only
+// through SetServerList.
 type TCPProxy struct {
+	mu         sync.RWMutex
 	ServerList []*TCPServer
 	Default    *TCPServer
 }
 
+// SetServerList atomically replaces the passthrough servers.
+func (p *TCPProxy) SetServerList(servers []*TCPServer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ServerList = servers
+}
+
 // Get returns the TCPServer to use for a given host.
 func (p *TCPProxy) Get(host string) *TCPServer {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	if p.ServerList == nil {
 		return p.Default
 	}
