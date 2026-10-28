@@ -17,6 +17,7 @@ limitations under the License.
 package tcpproxy
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
@@ -142,8 +143,8 @@ func TestGetHostname(t *testing.T) {
 		{name: "no extensions", data: buildClientHello(nil), wantErr: errNoServerName},
 		{name: "no sni", data: buildClientHello(otherExt), wantErr: errNoServerName},
 		{name: "inflated server_name length", data: inflatedName, wantErr: errTruncated},
-		{name: "inflated extensions length", data: inflatedExt, wantErr: errTruncated},
-		{name: "inflated handshake length", data: inflatedHandshake, wantErr: errTruncated},
+		{name: "extensions longer than input", data: inflatedExt, want: "example.com"},
+		{name: "handshake longer than input", data: inflatedHandshake, want: "example.com"},
 		{name: "length reaching into zero padding", data: padded, wantErr: errTruncated},
 		{name: "empty host name", data: buildClientHello(validSNI("")), wantErr: errInvalidHostname},
 		{name: "control char in host name", data: buildClientHello(validSNI("exa\x00mple.com")), wantErr: errInvalidHostname},
@@ -164,10 +165,16 @@ func TestGetHostname(t *testing.T) {
 }
 
 func TestGetHostnameAllTruncations(t *testing.T) {
-	data := realClientHello(t, "example.com")
-	for i := 0; i < len(data); i++ {
-		if _, err := getHostname(data[:i]); err == nil {
-			t.Fatalf("getHostname accepted a ClientHello truncated to %d of %d bytes", i, len(data))
+	const host = "passthrough.example.com"
+	data := realClientHello(t, host)
+	sniEnd := bytes.Index(data, []byte(host)) + len(host)
+	for i := 0; i <= len(data); i++ {
+		got, err := getHostname(data[:i])
+		switch {
+		case i < sniEnd && err == nil:
+			t.Fatalf("getHostname returned %q for %d bytes, before the server_name ends at %d", got, i, sniEnd)
+		case i >= sniEnd && (err != nil || got != host):
+			t.Fatalf("getHostname on the first %d of %d bytes: got %q, %v; want %q", i, len(data), got, err, host)
 		}
 	}
 }

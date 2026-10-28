@@ -129,6 +129,20 @@ func TestHandleRoutesBySNI(t *testing.T) {
 	def.expectNone(t)
 }
 
+func TestHandleRoutesPartialClientHelloBySNI(t *testing.T) {
+	const host = "passthrough.example.com"
+	passthrough := newBackend(t, host)
+	def := newBackend(t, "default")
+	p := &TCPProxy{ServerList: []*TCPServer{passthrough.server}, Default: def.server}
+
+	hello := realClientHello(t, host)
+	partial := hello[:bytes.Index(hello, []byte(host))+len(host)]
+	handle(t, p, partial)
+
+	passthrough.expect(t, partial)
+	def.expectNone(t)
+}
+
 func TestHandleMalformedClientHelloFallsBackToDefault(t *testing.T) {
 	passthrough := newBackend(t, "example.com")
 	def := newBackend(t, "default")

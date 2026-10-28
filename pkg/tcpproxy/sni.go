@@ -105,9 +105,32 @@ func (r *byteReader) prefixed(width int) (byteReader, bool) {
 	return b, ok
 }
 
+// prefixedPartial is like prefixed but, when the input ends before the
+// declared length, returns the bytes that are available. It lets a ClientHello
+// whose tail was not part of the first read still be routed by its SNI.
+func (r *byteReader) prefixedPartial(width int) (byteReader, bool) {
+	var n int
+	var ok bool
+	switch width {
+	case 2:
+		n, ok = r.uint16()
+	case 3:
+		n, ok = r.uint24()
+	}
+	if !ok {
+		return nil, false
+	}
+	if n > len(*r) {
+		n = len(*r)
+	}
+	b, _ := r.bytes(n)
+	return b, true
+}
+
 // getHostname extracts the SNI host_name from the TLS ClientHello at the
-// start of data. data must contain only bytes received from the peer.
-// It never panics on malformed input.
+// start of data. data must contain only bytes received from the peer; it may
+// end anywhere after the server_name extension. It never panics on malformed
+// input.
 func getHostname(data []byte) (string, error) {
 	r := byteReader(data)
 
@@ -130,7 +153,7 @@ func getHostname(data []byte) (string, error) {
 	if handshakeType != handshakeTypeClientHello {
 		return "", errNotClientHello
 	}
-	hello, ok := r.prefixed(3)
+	hello, ok := r.prefixedPartial(3)
 	if !ok {
 		return "", errTruncated
 	}
@@ -149,7 +172,7 @@ func getHostname(data []byte) (string, error) {
 		return "", errNoServerName
 	}
 
-	extensions, ok := hello.prefixed(2)
+	extensions, ok := hello.prefixedPartial(2)
 	if !ok {
 		return "", errTruncated
 	}
@@ -158,21 +181,23 @@ func getHostname(data []byte) (string, error) {
 		if !ok {
 			return "", errTruncated
 		}
-		extData, ok := extensions.prefixed(2)
-		if !ok {
+		if extType == extensionServerName {
+			extData, ok := extensions.prefixedPartial(2)
+			if !ok {
+				return "", errTruncated
+			}
+			return parseServerName(extData)
+		}
+		if _, ok := extensions.prefixed(2); !ok {
 			return "", errTruncated
 		}
-		if extType != extensionServerName {
-			continue
-		}
-		return parseServerName(extData)
 	}
 
 	return "", errNoServerName
 }
 
 func parseServerName(ext byteReader) (string, error) {
-	names, ok := ext.prefixed(2)
+	names, ok := ext.prefixedPartial(2)
 	if !ok {
 		return "", errTruncated
 	}
