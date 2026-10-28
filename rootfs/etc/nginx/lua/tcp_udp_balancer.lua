@@ -88,7 +88,9 @@ local function sync_backend(backend)
     return
   end
 
-  if is_backend_with_external_name(backend) then
+  -- DNS needs cosockets, which are unavailable in init_worker; the sync timer
+  -- resolves ExternalName backends shortly after.
+  if is_backend_with_external_name(backend) and ngx.get_phase() ~= "init_worker" then
     backend = resolve_external_names(backend)
     if #backend.endpoints == 0 then
       balancers[backend.name] = nil
