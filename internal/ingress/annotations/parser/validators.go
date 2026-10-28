@@ -146,6 +146,10 @@ func hasNestedUnboundedQuantifier(pattern string) bool {
 		atomIsOpen := false
 		switch c {
 		case '\\':
+			if i+1 < len(pattern) && pattern[i+1] == 'Q' {
+				i = skipQuoted(pattern, i)
+				break
+			}
 			i++
 		case '[':
 			i = skipCharClass(pattern, i)
@@ -187,6 +191,15 @@ func hasNestedUnboundedQuantifier(pattern string) bool {
 		lastWasOpen = atomIsOpen
 	}
 	return false
+}
+
+// skipQuoted returns the index of the last character of the \Q...\E literal span opened at start.
+func skipQuoted(pattern string, start int) int {
+	closing := strings.Index(pattern[start+2:], `\E`)
+	if closing < 0 {
+		return len(pattern)
+	}
+	return start + 2 + closing + 1
 }
 
 // skipCharClass returns the index of the ']' closing the character class opened at start.

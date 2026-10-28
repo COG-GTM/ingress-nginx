@@ -1203,7 +1203,7 @@ lua-shared-dicts: "certificate_data: 100, my_custom_plugin: 512k"
 Sets [lua_regex_match_limit](https://github.com/openresty/lua-nginx-module#lua_regex_match_limit), the maximum number of PCRE
 backtracking steps a single `ngx.re` match may take before it fails. This bounds the CPU a regular expression evaluated against
 client input, such as the `canary-by-header-pattern` annotation, can consume per request. A pattern that hits the limit is treated
-as not matching. Set to `0` to use the PCRE default (10000000).
+as not matching. Set to `0` to use the PCRE default (10000000); negative values fall back to the default below.
 
 _**default:**_ 100000
 

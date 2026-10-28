@@ -395,6 +395,9 @@ func TestValidateBacktrackingSafeRegex(t *testing.T) {
 		{`^(\(+)+$`, true},
 		{`^([a-z]+)+$`, true},
 		{`^(\d+)+$`, true},
+		{`^\Q(a+)+\E$`, false},
+		{`^(\Qa\E+)+$`, true},
+		{`^\Q(a+)+`, false},
 		{`^(a+)+$<script>`, true},
 	}
 	for _, tt := range tests {

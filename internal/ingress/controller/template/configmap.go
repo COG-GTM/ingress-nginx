@@ -467,6 +467,12 @@ func ReadConfig(src map[string]string) config.Configuration {
 		klog.Warningf("unexpected error merging defaults: %v", err)
 	}
 
+	if to.LuaRegexMatchLimit < 0 {
+		def := config.NewDefault().LuaRegexMatchLimit
+		klog.Warningf("lua-regex-match-limit of %v is invalid, using the default %v instead", to.LuaRegexMatchLimit, def)
+		to.LuaRegexMatchLimit = def
+	}
+
 	hash, err := hashstructure.Hash(to, hashstructure.FormatV1, &hashstructure.HashOptions{
 		TagName: "json",
 	})

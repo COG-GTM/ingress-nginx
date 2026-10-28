@@ -52,6 +52,28 @@ func TestProxyTimeoutParsing(t *testing.T) {
 	}
 }
 
+func TestLuaRegexMatchLimitParsing(t *testing.T) {
+	testCases := map[string]struct {
+		input  string
+		expect int
+	}{
+		"default":        {"", 100000},
+		"custom":         {"5000", 5000},
+		"pcre default":   {"0", 0},
+		"negative value": {"-1", 100000},
+	}
+	for n, tc := range testCases {
+		src := map[string]string{}
+		if tc.input != "" {
+			src["lua-regex-match-limit"] = tc.input
+		}
+		cfg := ReadConfig(src)
+		if cfg.LuaRegexMatchLimit != tc.expect {
+			t.Errorf("Testing %v. Expected %v but got %v", n, tc.expect, cfg.LuaRegexMatchLimit)
+		}
+	}
+}
+
 func TestMergeConfigMapToStruct(t *testing.T) {
 	conf := map[string]string{
 		"custom-http-errors":            "300,400,demo",
