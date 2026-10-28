@@ -34,6 +34,7 @@ import (
 
 	"k8s.io/ingress-nginx/internal/nginx"
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
+	"k8s.io/ingress-nginx/pkg/tcpproxy"
 )
 
 func TestConfigureDynamically(t *testing.T) {
@@ -443,4 +444,29 @@ func tryListen(network, address string) (l net.Listener, err error) {
 	}
 	err = wait.ExponentialBackoff(backoff, condFunc)
 	return
+}
+
+func TestParseStreamTimeout(t *testing.T) {
+	tests := map[string]time.Duration{
+		"600s":          600 * time.Second,
+		"600":           600 * time.Second,
+		" 10m ":         10 * time.Minute,
+		"500ms":         500 * time.Millisecond,
+		"1h30m":         90 * time.Minute,
+		"1h 30m":        90 * time.Minute,
+		"1d":            24 * time.Hour,
+		"2w":            14 * 24 * time.Hour,
+		"1M":            30 * 24 * time.Hour,
+		"1y":            365 * 24 * time.Hour,
+		"":              tcpproxy.DefaultIdleTimeout,
+		"0":             tcpproxy.DefaultIdleTimeout,
+		"-5s":           tcpproxy.DefaultIdleTimeout,
+		"10x":           tcpproxy.DefaultIdleTimeout,
+		"999999999999y": tcpproxy.DefaultIdleTimeout,
+	}
+	for value, expected := range tests {
+		if got := parseStreamTimeout(value); got != expected {
+			t.Errorf("parseStreamTimeout(%q) = %v, expected %v", value, got, expected)
+		}
+	}
 }

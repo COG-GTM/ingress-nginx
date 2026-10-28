@@ -17,9 +17,12 @@ limitations under the License.
 package tcpproxy
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"net"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"k8s.io/klog/v2"
 
@@ -34,10 +37,45 @@ type TCPServer struct {
 	ProxyProtocol bool
 }
 
+const (
+	// DefaultHandshakeTimeout is used when TCPProxy.HandshakeTimeout is not set.
+	DefaultHandshakeTimeout = 5 * time.Second
+	// DefaultIdleTimeout is used when TCPProxy.IdleTimeout is not set.
+	DefaultIdleTimeout = 600 * time.Second
+)
+
 // TCPProxy describes the passthrough servers and a default as catch all.
 type TCPProxy struct {
 	ServerList []*TCPServer
 	Default    *TCPServer
+
+	// handshakeTimeout bounds how long a client may take to send the
+	// initial TLS ClientHello and how long dialing the backend may take.
+	handshakeTimeout atomic.Int64
+	// idleTimeout closes a proxied connection when no data is transferred
+	// in either direction for this long.
+	idleTimeout atomic.Int64
+}
+
+// SetTimeouts updates the handshake and idle timeouts used by new
+// connections. Non-positive values select the defaults.
+func (p *TCPProxy) SetTimeouts(handshake, idle time.Duration) {
+	p.handshakeTimeout.Store(int64(handshake))
+	p.idleTimeout.Store(int64(idle))
+}
+
+func (p *TCPProxy) getHandshakeTimeout() time.Duration {
+	if d := time.Duration(p.handshakeTimeout.Load()); d > 0 {
+		return d
+	}
+	return DefaultHandshakeTimeout
+}
+
+func (p *TCPProxy) getIdleTimeout() time.Duration {
+	if d := time.Duration(p.idleTimeout.Load()); d > 0 {
+		return d
+	}
+	return DefaultIdleTimeout
 }
 
 // Get returns the TCPServer to use for a given host.
@@ -62,7 +100,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 	// See: https://www.ibm.com/docs/en/ztpf/1.1.0.15?topic=sessions-ssl-record-format
 	data := make([]byte, 16384)
 
-	length, err := conn.Read(data)
+	length, err := readWithTimeout(conn, data, p.getHandshakeTimeout())
 	if err != nil {
 		klog.V(4).ErrorS(err, "Error reading data from the connection")
 		return
@@ -82,7 +120,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 
 	hostPort := net.JoinHostPort(proxy.IP, fmt.Sprintf("%v", proxy.Port))
 	klog.V(4).InfoS("passing to", "hostport", hostPort)
-	clientConn, err := net.Dial("tcp", hostPort)
+	clientConn, err := net.DialTimeout("tcp", hostPort, p.getHandshakeTimeout())
 	if err != nil {
 		klog.V(4).ErrorS(err, "error dialing proxy", "ip", proxy.IP, "port", proxy.Port, "hostname", proxy.Hostname)
 		return
@@ -120,14 +158,85 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 		}
 	}
 
-	pipe(clientConn, conn)
+	pipe(clientConn, conn, p.getIdleTimeout())
 }
 
-func pipe(client, server net.Conn) {
-	doCopy := func(s, c net.Conn, cancel chan<- bool) {
-		//nolint:errcheck // No need to catch these errors
-		io.Copy(s, c)
-		cancel <- true
+// readWithTimeout performs a single Read bounded by timeout. Besides the read
+// deadline, the connection is closed when the timer fires, because wrappers
+// such as the PROXY protocol listener reset the deadline after parsing the
+// header.
+func readWithTimeout(conn net.Conn, buf []byte, timeout time.Duration) (int, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return 0, err
+	}
+	timer := time.AfterFunc(timeout, func() {
+		conn.Close()
+	})
+	n, err := conn.Read(buf)
+	if !timer.Stop() && err == nil {
+		err = errors.New("timeout reading from the connection")
+	}
+	if err != nil {
+		return n, err
+	}
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+var copyBufferPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+// pipe copies data in both directions until one side is closed or no data has
+// been transferred in either direction for idleTimeout.
+func pipe(client, server net.Conn, idleTimeout time.Duration) {
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+
+	doCopy := func(dst, src net.Conn, cancel chan<- bool) {
+		defer func() { cancel <- true }()
+
+		bufp, ok := copyBufferPool.Get().(*[]byte)
+		if !ok {
+			return
+		}
+		defer copyBufferPool.Put(bufp)
+		buf := *bufp
+
+		for {
+			deadline := time.Unix(0, lastActivity.Load()).Add(idleTimeout)
+			if !deadline.After(time.Now()) {
+				return
+			}
+			if err := src.SetReadDeadline(deadline); err != nil {
+				return
+			}
+
+			n, err := src.Read(buf)
+			if n > 0 {
+				lastActivity.Store(time.Now().UnixNano())
+				if err := dst.SetWriteDeadline(time.Now().Add(idleTimeout)); err != nil {
+					return
+				}
+				if _, err := dst.Write(buf[:n]); err != nil {
+					return
+				}
+				lastActivity.Store(time.Now().UnixNano())
+			}
+			if err != nil {
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
+					// the other direction may still be active
+					continue
+				}
+				return
+			}
+		}
 	}
 
 	cancel := make(chan bool, 2)
