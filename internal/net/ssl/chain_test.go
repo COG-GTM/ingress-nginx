@@ -37,11 +37,6 @@ import (
 	"time"
 )
 
-type testCert struct {
-	cert *x509.Certificate
-	key  *ecdsa.PrivateKey
-}
-
 func newTestKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -112,10 +107,16 @@ func countingServer(t *testing.T, handlers map[string]http.HandlerFunc) (*httpte
 	return srv, &hits
 }
 
+func writeBody(w http.ResponseWriter, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		panic(err)
+	}
+}
+
 func serveDER(c **x509.Certificate) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/pkix-cert")
-		_, _ = w.Write((*c).Raw)
+		writeBody(w, (*c).Raw)
 	}
 }
 
@@ -241,7 +242,7 @@ func TestFullChainCertRejectsBadIssuerResponses(t *testing.T) {
 
 	srv, _ := countingServer(t, map[string]http.HandlerFunc{
 		"/big": func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(bytes.Repeat([]byte("A"), maxIssuerCertSize+1))
+			writeBody(w, bytes.Repeat([]byte("A"), maxIssuerCertSize+1))
 		},
 		"/status": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
