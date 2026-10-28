@@ -2680,3 +2680,164 @@ func newDynamicNginxController(t *testing.T, setConfigMap func(string) *corev1.C
 		metricCollector: metric.DummyCollector{},
 	}
 }
+
+func TestCheckOverlap(t *testing.T) {
+	type overlapPath struct {
+		path     string
+		pathType *networking.PathType
+	}
+
+	newIngress := func(namespace, name, canaryValue string, paths ...overlapPath) *ingress.Ingress {
+		httpPaths := make([]networking.HTTPIngressPath, 0, len(paths))
+		for _, p := range paths {
+			httpPaths = append(httpPaths, networking.HTTPIngressPath{
+				Path:     p.path,
+				PathType: p.pathType,
+				Backend: networking.IngressBackend{
+					Service: &networking.IngressServiceBackend{
+						Name: name + "-svc",
+						Port: networking.ServiceBackendPort{Number: 80},
+					},
+				},
+			})
+		}
+
+		annotationsMap := map[string]string{}
+		if canaryValue != "" {
+			annotationsMap[parser.GetAnnotationWithPrefix("canary")] = canaryValue
+		}
+
+		return &ingress.Ingress{
+			Ingress: networking.Ingress{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   namespace,
+					Name:        name,
+					Annotations: annotationsMap,
+				},
+				Spec: networking.IngressSpec{
+					Rules: []networking.IngressRule{
+						{
+							Host: "shop.example.com",
+							IngressRuleValue: networking.IngressRuleValue{
+								HTTP: &networking.HTTPIngressRuleValue{Paths: httpPaths},
+							},
+						},
+					},
+				},
+			},
+			ParsedAnnotations: &annotations.Ingress{
+				Canary: canary.Config{Enabled: canaryValue == "true"},
+			},
+		}
+	}
+
+	checkout := overlapPath{"/checkout", &pathTypePrefix}
+	victim := func() *ingress.Ingress { return newIngress("shop", "checkout", "", checkout) }
+
+	testCases := []struct {
+		name      string
+		existing  []*ingress.Ingress
+		submitted *ingress.Ingress
+		wantErr   bool
+	}{
+		{
+			name:      "same host and path in another namespace",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "", checkout),
+			wantErr:   true,
+		},
+		{
+			name:     "second path overlaps another namespace's ingress",
+			existing: []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "",
+				overlapPath{"/harmless", &pathTypePrefix},
+				checkout),
+			wantErr: true,
+		},
+		{
+			name:      "canary false overlapping a non-canary ingress",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "false", checkout),
+			wantErr:   true,
+		},
+		{
+			name:      "invalid canary value overlapping a non-canary ingress",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "maybe", checkout),
+			wantErr:   true,
+		},
+		{
+			name:      "pathType Exact overlapping a Prefix path",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "false", overlapPath{"/checkout", &pathTypeExact}),
+			wantErr:   true,
+		},
+		{
+			name:      "pathType Prefix overlapping an Exact path",
+			existing:  []*ingress.Ingress{newIngress("shop", "checkout", "", overlapPath{"/checkout", &pathTypeExact})},
+			submitted: newIngress("team-m", "steal", "", checkout),
+			wantErr:   true,
+		},
+		{
+			name:      "Prefix path with trailing slash overlapping a Prefix path",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "steal", "", overlapPath{"/checkout/", &pathTypePrefix}),
+			wantErr:   true,
+		},
+		{
+			name:      "both ingresses are canaries",
+			existing:  []*ingress.Ingress{newIngress("shop", "checkout-canary", "true", checkout)},
+			submitted: newIngress("team-m", "steal", "true", checkout),
+			wantErr:   true,
+		},
+		{
+			name: "second canary for a path that already has a canary",
+			existing: []*ingress.Ingress{
+				victim(),
+				newIngress("shop", "checkout-canary", "true", checkout),
+			},
+			submitted: newIngress("team-m", "steal", "true", overlapPath{"/checkout", &pathTypeExact}),
+			wantErr:   true,
+		},
+		{
+			name:      "canary ingress for an existing path",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("shop", "checkout-canary", "true", checkout),
+			wantErr:   false,
+		},
+		{
+			name:     "updating an ingress that owns all of its paths",
+			existing: []*ingress.Ingress{newIngress("shop", "other", "", overlapPath{"/cart", &pathTypePrefix})},
+			submitted: newIngress("shop", "checkout", "",
+				checkout,
+				overlapPath{"/checkout", &pathTypeExact},
+				overlapPath{"/pay", &pathTypePrefix}),
+			wantErr: false,
+		},
+		{
+			name:      "different path on the same host",
+			existing:  []*ingress.Ingress{victim()},
+			submitted: newIngress("team-m", "blog", "", overlapPath{"/blog", &pathTypePrefix}),
+			wantErr:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nginxController := newDynamicNginxController(t, testConfigMap)
+
+			ings := make([]*ingress.Ingress, 0, len(tc.existing)+1)
+			ings = append(ings, tc.existing...)
+			ings = append(ings, tc.submitted)
+
+			_, servers, _ := nginxController.getConfiguration(ings)
+			err := checkOverlap(&tc.submitted.Ingress, ings, servers)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected an overlap error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+		})
+	}
+}
