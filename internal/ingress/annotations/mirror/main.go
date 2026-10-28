@@ -265,7 +265,7 @@ func validateMirrorHost(host string) error {
 }
 
 var (
-	numericLabel = regexp.MustCompile(`^(0x[0-9a-f]*|[0-9]+)$`)
+	numericLabel = regexp.MustCompile(`^(0x[\da-f]*|\d+)$`)
 	// variables that always start with "/" and so cannot change the host or port
 	uriVariable = regexp.MustCompile(`^\$(request_uri|uri|document_uri)\b`)
 )
