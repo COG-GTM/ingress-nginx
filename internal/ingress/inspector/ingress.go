@@ -57,6 +57,9 @@ func inspectIngressRule(httprule *networking.HTTPIngressRuleValue) error {
 		if err := CheckRegex(path.Path); err != nil {
 			return fmt.Errorf("invalid http path: %s", err)
 		}
+		if err := CheckPath(path.Path); err != nil {
+			return fmt.Errorf("invalid http path: %s", err)
+		}
 	}
 	return nil
 }

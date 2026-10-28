@@ -68,3 +68,39 @@ func TestCheckRegex(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "plain path", value: "/foo/bar-baz_1"},
+		{name: "regex path", value: "/api/v1(/|$)(.*)"},
+		{name: "regex with escaped dot", value: `/foo\.php$`},
+		{name: "regex quantifiers", value: "/foo/[a-z]{3}/[0-9]{2,}/x{1,4}"},
+		{name: "matrix-free url characters", value: "/a+b/c=d/e~f/%20/@x/!y/*z"},
+		{name: "config injection", value: "/x {\n}\n}\n}\nssl_engine /proc/self/fd/7;\n#", wantErr: true},
+		{name: "space", value: "/x y", wantErr: true},
+		{name: "tab", value: "/x\ty", wantErr: true},
+		{name: "newline", value: "/x\ny", wantErr: true},
+		{name: "carriage return", value: "/x\ry", wantErr: true},
+		{name: "nul", value: "/x\x00", wantErr: true},
+		{name: "semicolon", value: "/x;proxy_pass", wantErr: true},
+		{name: "double quote", value: `/x"`, wantErr: true},
+		{name: "single quote", value: "/x'", wantErr: true},
+		{name: "backtick", value: "/x`", wantErr: true},
+		{name: "hash", value: "/x#", wantErr: true},
+		{name: "open brace", value: "/x{", wantErr: true},
+		{name: "close brace", value: "/x}", wantErr: true},
+		{name: "non quantifier braces", value: "/x{a}", wantErr: true},
+		{name: "block braces", value: "/x{}", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := CheckPath(tt.value); (err != nil) != tt.wantErr {
+				t.Errorf("CheckPath(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+			}
+		})
+	}
+}
