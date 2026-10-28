@@ -53,8 +53,7 @@ func getEndpointsFromSlices(s *corev1.Service, port *corev1.ServicePort, proto c
 
 	// ExternalName services
 	if s.Spec.Type == corev1.ServiceTypeExternalName {
-		if ip := net.ParseIP(s.Spec.ExternalName); s.Spec.ExternalName == "localhost" ||
-			(ip != nil && ip.IsLoopback()) {
+		if isLocalExternalName(s.Spec.ExternalName) {
 			klog.Errorf("Invalid attempt to use localhost name %s in %q", s.Spec.ExternalName, svcKey)
 			return upsServers
 		}
@@ -165,4 +164,33 @@ func getEndpointsFromSlices(s *corev1.Service, port *corev1.ServicePort, proto c
 
 	klog.V(3).Infof("Endpoints found for Service %q: %v", svcKey, upsServers)
 	return upsServers
+}
+
+// isLocalExternalName reports whether an ExternalName would make nginx
+// connect back to the ingress pod itself: localhost names, loopback
+// (127.0.0.0/8, ::1), "this host" (0.0.0.0/8, ::) and their IPv4-mapped or
+// IPv4-compatible IPv6 forms.
+func isLocalExternalName(name string) bool {
+	host := strings.ToLower(strings.TrimSuffix(name, "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsUnspecified() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 0
+	}
+	// IPv4-compatible ::a.b.c.d
+	for _, b := range ip[:12] {
+		if b != 0 {
+			return false
+		}
+	}
+	return ip[12] == 0 || ip[12] == 127
 }

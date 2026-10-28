@@ -2,6 +2,7 @@ local ngx_balancer = require("ngx.balancer")
 local cjson = require("cjson.safe")
 local util = require("util")
 local dns_lookup = require("util.dns").lookup
+local peer_util = require("util.peer")
 local configuration = require("tcp_udp_configuration")
 local round_robin = require("balancer.round_robin")
 
@@ -24,9 +25,6 @@ local DEFAULT_LB_ALG = "round_robin"
 local IMPLEMENTATIONS = {
   round_robin = round_robin
 }
-
-local PROHIBITED_LOCALHOST_PORT = configuration.prohibited_localhost_port or '10246'
-local PROHIBITED_PEER_PATTERN = "^127.*:" .. PROHIBITED_LOCALHOST_PORT .. "$"
 
 local _M = {}
 local balancers = {}
@@ -83,6 +81,13 @@ local function sync_backend(backend)
   end
 
   ngx.log(ngx.INFO, "sync tcp/udp backend: ", backend.name)
+
+  if is_backend_with_external_name(backend) then
+    backend = resolve_external_names(backend)
+  end
+
+  backend.endpoints = format_ipv6_endpoints(backend.endpoints)
+
   local implementation = get_implementation(backend)
   local balancer = balancers[backend.name]
 
@@ -100,12 +105,6 @@ local function sync_backend(backend)
     balancers[backend.name] = implementation:new(backend)
     return
   end
-
-  if is_backend_with_external_name(backend) then
-    backend = resolve_external_names(backend)
-  end
-
-  backend.endpoints = format_ipv6_endpoints(backend.endpoints)
 
   balancer:sync(backend)
 end
@@ -184,7 +183,9 @@ function _M.balance()
     return
   end
 
-  if peer:match(PROHIBITED_PEER_PATTERN) then
+  -- stream backends never legitimately point at this host; nginx's own
+  -- control sockets (status and stream configuration) listen on loopback
+  if peer_util.is_local(peer) then
     ngx.log(ngx.ERR, "attempted to proxy to self, balancer: ", balancer.name, ", peer: ", peer)
     return
   end

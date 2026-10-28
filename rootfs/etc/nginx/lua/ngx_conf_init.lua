@@ -23,10 +23,10 @@ if not ok then
   error("require failed: " .. tostring(res))
 else
   configuration = res
-  if not configfile.listen_ports.status_port then
-    error("required status port not found")
+  if not configfile.listen_ports.default_port then
+    error("required default server port not found")
   end
-  configuration.prohibited_localhost_port = configfile.listen_ports.status_port
+  configuration.default_server_port = configfile.listen_ports.default_port
 end
 ok, res = pcall(require, "balancer")
 if not ok then

@@ -2,6 +2,7 @@ local ngx_balancer = require("ngx.balancer")
 local cjson = require("cjson.safe")
 local util = require("util")
 local dns_lookup = require("util.dns").lookup
+local peer_util = require("util.peer")
 local configuration = require("configuration")
 local round_robin = require("balancer.round_robin")
 local chash = require("balancer.chash")
@@ -34,8 +35,9 @@ local IMPLEMENTATIONS = {
   ewma = ewma,
 }
 
-local PROHIBITED_LOCALHOST_PORT = configuration.prohibited_localhost_port or '10246'
-local PROHIBITED_PEER_PATTERN = "^127.*:" .. PROHIBITED_LOCALHOST_PORT .. "$"
+-- the controller's built-in default backend (DefaultEndpoint) is the only
+-- loopback peer an HTTP upstream may use
+local DEFAULT_SERVER_PEER = "127.0.0.1:" .. (configuration.default_server_port or '8181')
 
 local _M = {}
 local balancers = {}
@@ -336,7 +338,7 @@ function _M.balance()
     return
   end
 
-  if peer:match(PROHIBITED_PEER_PATTERN) then
+  if peer ~= DEFAULT_SERVER_PEER and peer_util.is_local(peer) then
     ngx.log(ngx.ERR, "attempted to proxy to self, balancer: ", balancer.name, ", peer: ", peer)
     return
   end
