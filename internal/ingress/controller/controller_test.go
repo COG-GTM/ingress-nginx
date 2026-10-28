@@ -2791,6 +2791,15 @@ func TestCheckOverlap(t *testing.T) {
 			wantErr:   true,
 		},
 		{
+			name: "second canary for a path that already has a canary",
+			existing: []*ingress.Ingress{
+				victim(),
+				newIngress("shop", "checkout-canary", "true", checkout),
+			},
+			submitted: newIngress("team-m", "steal", "true", overlapPath{"/checkout", &pathTypeExact}),
+			wantErr:   true,
+		},
+		{
 			name:      "canary ingress for an existing path",
 			existing:  []*ingress.Ingress{victim()},
 			submitted: newIngress("shop", "checkout-canary", "true", checkout),
@@ -2822,7 +2831,7 @@ func TestCheckOverlap(t *testing.T) {
 			ings = append(ings, tc.submitted)
 
 			_, servers, _ := nginxController.getConfiguration(ings)
-			err := checkOverlap(&tc.submitted.Ingress, servers)
+			err := checkOverlap(&tc.submitted.Ingress, ings, servers)
 			if tc.wantErr && err == nil {
 				t.Errorf("expected an overlap error, got nil")
 			}

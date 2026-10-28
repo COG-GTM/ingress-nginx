@@ -402,7 +402,7 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 	startTest := time.Now().UnixNano() / 1000000
 	_, servers, pcfg := n.getConfiguration(ings)
 
-	err = checkOverlap(ing, servers)
+	err = checkOverlap(ing, ings, servers)
 	if err != nil {
 		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
 		return err
@@ -1791,11 +1791,12 @@ func externalNamePorts(name string, svc *apiv1.Service) *apiv1.ServicePort {
 // by another Ingress. Every rule and path is checked, and paths are compared
 // regardless of pathType because Exact and Prefix locations for the same path
 // shadow each other in nginx. A duplicate is only allowed when exactly one of
-// the two Ingresses is a canary.
+// the two Ingresses is a canary. Canary Ingresses never own a location, so a
+// canary is also compared against the other canary Ingresses in ings.
 //
 // This is a consistency check, not a tenancy boundary: host ownership across
 // namespaces must be enforced with a policy engine.
-func checkOverlap(ing *networking.Ingress, servers []*ingress.Server) error {
+func checkOverlap(ing *networking.Ingress, ings []*ingress.Ingress, servers []*ingress.Server) error {
 	isCanary := isCanaryIngress(ing)
 
 	for _, rule := range ing.Spec.Rules {
@@ -1832,10 +1833,60 @@ func checkOverlap(ing *networking.Ingress, servers []*ingress.Server) error {
 
 				return fmt.Errorf(`host "%s" and path "%s" is already defined in ingress %s/%s`, host, ingPath, existing.Namespace, existing.Name)
 			}
+
+			if !isCanary {
+				continue
+			}
+
+			for _, other := range ings {
+				if other.Namespace == ing.Namespace && other.Name == ing.Name {
+					continue
+				}
+
+				if isCanaryIngress(&other.Ingress) && definesHostPath(&other.Ingress, host, ingPath) {
+					return fmt.Errorf(`host "%s" and path "%s" is already defined in canary ingress %s/%s`, host, ingPath, other.Namespace, other.Name)
+				}
+			}
 		}
 	}
 
 	return nil
+}
+
+// definesHostPath reports whether ing has a service backend for host and path,
+// ignoring pathType and a trailing slash.
+func definesHostPath(ing *networking.Ingress, host, path string) bool {
+	want := overlapPath(path)
+
+	for _, rule := range ing.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+
+		ruleHost := rule.Host
+		if ruleHost == "" {
+			ruleHost = defServerName
+		}
+		if ruleHost != host {
+			continue
+		}
+
+		for _, p := range rule.HTTP.Paths {
+			if p.Backend.Service == nil {
+				continue
+			}
+
+			ingPath := p.Path
+			if ingPath == "" {
+				ingPath = rootLocation
+			}
+			if overlapPath(ingPath) == want {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func isCanaryIngress(ing *networking.Ingress) bool {
