@@ -226,6 +226,7 @@ type LuaConfig struct {
 type LuaListenPorts struct {
 	HTTPSPort    string `json:"https"`
 	StatusPort   string `json:"status_port"`
+	StreamPort   string `json:"stream_port"`
 	SSLProxyPort string `json:"ssl_proxy"`
 }
 

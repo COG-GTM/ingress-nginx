@@ -439,6 +439,53 @@ describe("Balancer", function()
       assert.stub(mock_instance.sync).was_called_with(mock_instance, expected_backend)
     end)
 
+    it("drops ExternalName endpoints that resolve to the controller itself", function()
+      backend = {
+        name = "self-proxy", service = { spec = { ["type"] = "ExternalName" } },
+        endpoints = {
+          { address = "self-proxy.example.com", port = "10246", maxFails = 0, failTimeout = 0 }
+        }
+      }
+
+      helpers.mock_resty_dns_query(nil, {
+        { name = "self-proxy.example.com", address = "0.0.0.0", ttl = 60 },
+        { name = "self-proxy.example.com", address = "::ffff:127.0.0.1", ttl = 60 },
+        { name = "self-proxy.example.com", address = "127.0.0.1", ttl = 60 },
+        { name = "self-proxy.example.com", address = "169.254.169.254", ttl = 60 },
+        { name = "self-proxy.example.com", address = "1.2.3.4", ttl = 60 },
+      })
+      expected_backend = {
+        name = "self-proxy", service = { spec = { ["type"] = "ExternalName" } },
+        endpoints = {
+          { address = "1.2.3.4", port = "10246" },
+        }
+      }
+
+      local mock_instance = { sync = function(backend) end }
+      setmetatable(mock_instance, implementation)
+      implementation.new = function(self, backend) return mock_instance end
+      local s = spy.on(implementation, "new")
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      assert.spy(s).was_called_with(implementation, expected_backend)
+    end)
+
+    it("does not create a balancer when every ExternalName endpoint is refused", function()
+      backend = {
+        name = "zero-external-name", service = { spec = { ["type"] = "ExternalName" } },
+        endpoints = {
+          { address = "0.0.0.0", port = "10246", maxFails = 0, failTimeout = 0 }
+        }
+      }
+
+      helpers.mock_resty_dns_query(nil, nil, "no such host")
+      local s = spy.on(implementation, "new")
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      assert.spy(s).was_not_called()
+
+      mock_ngx({ var = { proxy_upstream_name = backend.name }, ctx = {} })
+      assert.is_nil(balancer.get_balancer())
+    end)
+
     it("wraps IPv6 addresses into square brackets", function()
       local backend = {
         name = "example-com",
@@ -494,6 +541,50 @@ describe("Balancer", function()
 
       assert.has_no.errors(function() balancer.sync_backend(backend) end)
       assert.stub(mock_instance.sync).was_called_with(mock_instance, backend)
+    end)
+  end)
+
+  describe("balance()", function()
+    local ngx_balancer = require("ngx.balancer")
+
+    before_each(function()
+      stub(ngx_balancer, "set_current_peer")
+      stub(ngx_balancer, "set_more_tries")
+    end)
+
+    after_each(function()
+      ngx_balancer.set_current_peer:revert()
+      ngx_balancer.set_more_tries:revert()
+      reset_ngx()
+    end)
+
+    local function balance_to(address, port)
+      local backend = {
+        name = "balance-test",
+        endpoints = { { address = address, port = port, maxFails = 0, failTimeout = 0 } },
+      }
+      mock_ngx({ var = { proxy_upstream_name = backend.name }, ctx = {} })
+      balancer.sync_backend(backend)
+      balancer.balance()
+    end
+
+    it("refuses peers that point back at the controller", function()
+      for _, case in ipairs({
+        { "0.0.0.0", "10246" }, { "0.0.0.0", "80" }, { "127.0.0.1", "10246" },
+        { "127.0.0.2", "10247" }, { "::ffff:127.0.0.1", "10246" }, { "::ffff:7f00:1", "8181" },
+        { "::", "10246" }, { "::1", "10246" }, { "169.254.169.254", "80" },
+      }) do
+        balance_to(case[1], case[2])
+        assert.stub(ngx_balancer.set_current_peer).was_not_called()
+      end
+    end)
+
+    it("allows the default backend and regular peers", function()
+      balance_to("127.0.0.1", "8181")
+      assert.stub(ngx_balancer.set_current_peer).was_called_with("127.0.0.1:8181")
+
+      balance_to("10.0.0.1", "10246")
+      assert.stub(ngx_balancer.set_current_peer).was_called_with("10.0.0.1:10246")
     end)
   end)
 
