@@ -18,6 +18,8 @@ package nginx
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	ps "github.com/mitchellh/go-ps"
@@ -61,12 +64,71 @@ var StatusPath = "/nginx_status"
 // StreamPort defines the port used by NGINX for the NGINX stream configuration socket
 var StreamPort = 10247
 
+// LuaConfigPath is the configuration file written by the controller for the Lua modules
+var LuaConfigPath = "/etc/nginx/lua/cfg.json"
+
+// ConfigurationTokenHeader is the header that must carry the configuration token
+// on every request to the /configuration endpoint of the status server.
+const ConfigurationTokenHeader = "X-Ingress-Nginx-Configuration-Token"
+
+var (
+	configurationTokenMu sync.Mutex
+	configurationToken   string
+)
+
+// GenerateConfigurationToken creates a new random token that authenticates the
+// controller against the /configuration endpoint of the status server.
+func GenerateConfigurationToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating configuration token: %w", err)
+	}
+
+	configurationTokenMu.Lock()
+	defer configurationTokenMu.Unlock()
+	configurationToken = hex.EncodeToString(b)
+
+	return configurationToken, nil
+}
+
+// ConfigurationToken returns the token used to authenticate requests to the
+// /configuration endpoint. Processes other than the controller (e.g. dbg) read
+// it from the Lua configuration file written by the controller.
+func ConfigurationToken() string {
+	configurationTokenMu.Lock()
+	defer configurationTokenMu.Unlock()
+
+	if configurationToken != "" {
+		return configurationToken
+	}
+
+	data, err := os.ReadFile(LuaConfigPath)
+	if err != nil {
+		return ""
+	}
+
+	luaCfg := struct {
+		ConfigurationToken string `json:"configuration_token"`
+	}{}
+	if err := json.Unmarshal(data, &luaCfg); err != nil {
+		return ""
+	}
+
+	return luaCfg.ConfigurationToken
+}
+
 // NewGetStatusRequest creates a new GET request to the internal NGINX status server
 func NewGetStatusRequest(path string) (statusCode int, data []byte, err error) {
 	url := fmt.Sprintf("http://127.0.0.1:%v%v", StatusPort, path)
 
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set(ConfigurationTokenHeader, ConfigurationToken())
+
 	client := http.Client{}
-	res, err := client.Get(url)
+	res, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -89,8 +151,15 @@ func NewPostStatusRequest(path, contentType string, data interface{}) (statusCod
 		return 0, nil, err
 	}
 
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set(ConfigurationTokenHeader, ConfigurationToken())
+
 	client := http.Client{}
-	res, err := client.Post(url, contentType, bytes.NewReader(buf))
+	res, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

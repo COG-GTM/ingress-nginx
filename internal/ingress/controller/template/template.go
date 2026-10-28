@@ -221,6 +221,7 @@ type LuaConfig struct {
 	HSTSMaxAge              string         `json:"hsts_max_age"`
 	HSTSIncludeSubdomains   bool           `json:"hsts_include_subdomains"`
 	HSTSPreload             bool           `json:"hsts_preload"`
+	ConfigurationToken      string         `json:"configuration_token"`
 }
 
 type LuaListenPorts struct {

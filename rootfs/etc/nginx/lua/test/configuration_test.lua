@@ -50,10 +50,53 @@ describe("Configuration", function()
     _G.ngx = get_mocked_ngx_env()
     package.loaded["configuration"] = nil
     configuration = require("configuration")
+    configuration.configuration_token = "test-token"
+    ngx.var.http_x_ingress_nginx_configuration_token = "test-token"
   end)
 
   after_each(function()
     _G.ngx = unmocked_ngx
+  end)
+
+  describe("Authorization", function()
+    before_each(function()
+      ngx.shared.configuration_data:flush_all()
+      ngx.var.request_method = "POST"
+      ngx.var.request_uri = "/configuration/backends"
+    end)
+
+    it("rejects requests without the configuration token", function()
+      ngx.var.http_x_ingress_nginx_configuration_token = nil
+      local s = spy.on(configuration, "get_backends_data")
+      assert.has_no.errors(configuration.call)
+      assert.equal(ngx.status, ngx.HTTP_UNAUTHORIZED)
+      assert.is_nil(ngx.shared.configuration_data:get("backends"))
+      assert.spy(s).was_not_called()
+    end)
+
+    it("rejects requests with a wrong configuration token", function()
+      ngx.var.http_x_ingress_nginx_configuration_token = "wrong-token"
+      assert.has_no.errors(configuration.call)
+      assert.equal(ngx.status, ngx.HTTP_UNAUTHORIZED)
+      assert.is_nil(ngx.shared.configuration_data:get("backends"))
+    end)
+
+    it("rejects every request when no token is configured", function()
+      configuration.configuration_token = nil
+      ngx.var.http_x_ingress_nginx_configuration_token = nil
+      assert.has_no.errors(configuration.call)
+      assert.equal(ngx.status, ngx.HTTP_UNAUTHORIZED)
+
+      configuration.configuration_token = ""
+      ngx.var.http_x_ingress_nginx_configuration_token = ""
+      assert.has_no.errors(configuration.call)
+      assert.equal(ngx.status, ngx.HTTP_UNAUTHORIZED)
+    end)
+
+    it("accepts requests with the configuration token", function()
+      assert.has_no.errors(configuration.call)
+      assert.equal(ngx.status, ngx.HTTP_CREATED)
+    end)
   end)
 
   describe("Backends", function()

@@ -85,6 +85,10 @@ func NewNGINXController(config *Configuration, mc metric.Collector) *NGINXContro
 		klog.Warningf("Error reading system nameservers: %v", err)
 	}
 
+	if _, err := nginx.GenerateConfigurationToken(); err != nil {
+		klog.Fatalf("Error creating the dynamic configuration token: %v", err)
+	}
+
 	n := &NGINXController{
 		isIPV6Enabled: ing_net.IsIPv6Enabled(),
 
@@ -1100,12 +1104,13 @@ func (n *NGINXController) createLuaConfig(cfg *ngx_config.Configuration) error {
 		HSTSMaxAge:              cfg.HSTSMaxAge,
 		HSTSIncludeSubdomains:   cfg.HSTSIncludeSubdomains,
 		HSTSPreload:             cfg.HSTSPreload,
+		ConfigurationToken:      nginx.ConfigurationToken(),
 	}
 	jsonCfg, err := json.Marshal(luaconfigs)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(luaCfgPath, jsonCfg, file.ReadWriteByUser)
+	return os.WriteFile(nginx.LuaConfigPath, jsonCfg, file.ReadWriteByUser)
 }
 
 func cleanTempNginxCfg() error {

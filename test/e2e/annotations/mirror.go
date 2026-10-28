@@ -18,9 +18,11 @@ package annotations
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/stretchr/testify/assert"
 
 	"k8s.io/ingress-nginx/test/e2e/framework"
 )
@@ -33,9 +35,9 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 		f.NewEchoDeployment()
 	})
 
-	ginkgo.It("should set mirror-target to http://localhost/mirror", func() {
+	ginkgo.It("should set mirror-target to http://mirror.example.com/mirror", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target": "http://localhost/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target": "http://mirror.example.com/mirror",
 		}
 
 		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
@@ -66,7 +68,7 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 
 	ginkgo.It("should disable mirror-request-body", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target":       "http://localhost/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target":       "http://mirror.example.com/mirror",
 			"nginx.ingress.kubernetes.io/mirror-request-body": "off",
 		}
 
@@ -78,5 +80,51 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 				return strings.Contains(server, fmt.Sprintf("mirror /_mirror-%v;", ing.UID)) &&
 					strings.Contains(server, "mirror_request_body off;")
 			})
+	})
+
+	ginkgo.It("should reject mirror-target pointing to the internal configuration endpoint", func() {
+		annotations := map[string]string{
+			"nginx.ingress.kubernetes.io/mirror-target": "http://127.0.0.1:10246/configuration/backends",
+		}
+
+		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
+		ing = f.EnsureIngress(ing)
+
+		f.WaitForNginxServer(host,
+			func(server string) bool {
+				return strings.Contains(server, fmt.Sprintf("server_name %v", host)) &&
+					!strings.Contains(server, "mirror /_mirror-") &&
+					!strings.Contains(server, "10246")
+			})
+
+		f.WaitForNginxConfiguration(func(cfg string) bool {
+			return !strings.Contains(cfg, fmt.Sprintf("/_mirror-%v", ing.UID))
+		})
+	})
+
+	ginkgo.It("should keep the controller-generated backends after posting to an ingress with a rejected mirror-target", func() {
+		annotations := map[string]string{
+			"nginx.ingress.kubernetes.io/mirror-target": "http://127.0.0.1:10246/configuration/backends",
+		}
+
+		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
+		f.EnsureIngress(ing)
+
+		f.WaitForNginxServer(host,
+			func(server string) bool {
+				return strings.Contains(server, fmt.Sprintf("server_name %v", host)) &&
+					!strings.Contains(server, "mirror /_mirror-")
+			})
+
+		f.HTTPTestClient().
+			DoRequest(http.MethodPost, "/").
+			WithHeader("Host", host).
+			Expect().
+			Status(http.StatusOK)
+
+		output, err := f.ExecIngressPod("/dbg backends list")
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.NotContains(ginkgo.GinkgoT(), output, "Nginx returned code")
+		assert.Contains(ginkgo.GinkgoT(), output, fmt.Sprintf("%v-%v-80", f.Namespace, framework.EchoService))
 	})
 })
