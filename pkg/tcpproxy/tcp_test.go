@@ -41,7 +41,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestSetServerListConcurrentWithGet(t *testing.T) {
+func TestSetServerListConcurrentWithGet(_ *testing.T) {
 	p := &TCPProxy{Default: &TCPServer{Hostname: "localhost"}}
 
 	var wg sync.WaitGroup
