@@ -75,6 +75,88 @@ func TestValidateArrayOfServerName(t *testing.T) {
 	}
 }
 
+func TestValidateServerAlias(t *testing.T) {
+	valid := []string{
+		"",
+		"  ",
+		"bar",
+		"something.com",
+		"*.something.com",
+		"www.something.*",
+		".something.com",
+		"*.so*mething.com",
+		`~^www\d+\.example\.com$`,
+		`~^(www|api)\.example\.com$`,
+		"~^$",
+		`~^a\\\\b$`,
+		"~^(^)?a$",
+		`~^[[:alpha:]]+\.example\.com$`,
+		`~^a[.]b[=]c[^]x]$`,
+		"~^(?i)www\\.example\\.com$",
+	}
+	for _, value := range valid {
+		if err := ValidateServerAlias(value); err != nil {
+			t.Errorf("ValidateServerAlias(%q) returned unexpected error: %v", value, err)
+		}
+	}
+
+	invalid := []string{
+		"*",
+		"**",
+		".",
+		"*.",
+		"*a",
+		"*something.com",
+		"~",
+		"~^a{2}$",
+		`~\p{L}`,
+		"a{b",
+		"a}b",
+		"~(",
+		"~a)",
+		"~[a",
+		"~*a",
+		"~a**",
+		`~^a\1$`,
+		"~^+",
+		"~a$?",
+		"~^*b",
+		"~a(?)*b",
+		"~a(?i)+b",
+		"~[.*.]a1",
+		"~a[=a=]",
+		"~[:alpha:]+",
+		"~[a[.b.]]",
+		`~a\\`,
+		`~[\\]`,
+		"lolo;xpto.com",
+		"a b",
+	}
+	for _, value := range invalid {
+		if err := ValidateServerAlias(value); err == nil {
+			t.Errorf("ValidateServerAlias(%q) expected an error", value)
+		}
+	}
+}
+
+func TestValidateArrayOfServerAlias(t *testing.T) {
+	tests := []struct {
+		value   string
+		wantErr bool
+	}{
+		{"a.com, b.com, ,    c.com", false},
+		{`*.example.com,www.example.*,~^www\d+\.example\.com$`, false},
+		{"a.com,*", true},
+		{"a.com,.", true},
+		{"a.com,~^a{2}$", true},
+	}
+	for _, tt := range tests {
+		if err := ValidateArrayOfServerAlias(tt.value); (err != nil) != tt.wantErr {
+			t.Errorf("ValidateArrayOfServerAlias(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+		}
+	}
+}
+
 func Test_checkAnnotation(t *testing.T) {
 	type args struct {
 		name   string

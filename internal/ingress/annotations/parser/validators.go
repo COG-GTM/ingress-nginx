@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,145 @@ func ValidateServerName(value string) error {
 	value = strings.TrimSpace(value)
 	if !IsValidRegex.MatchString(value) {
 		return fmt.Errorf("value %s is invalid server name", value)
+	}
+	return nil
+}
+
+// ValidateArrayOfServerAlias validates a comma separated list of server aliases
+// using ValidateServerAlias.
+func ValidateArrayOfServerAlias(value string) error {
+	for _, alias := range strings.Split(value, ",") {
+		if err := ValidateServerAlias(alias); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateServerAlias validates a value that is written unquoted into the NGINX
+// server_name directive. On top of ValidateServerName it rejects values NGINX
+// cannot parse: curly braces (they end the directive), invalid wildcards such as
+// "*", "*." or "." and regexes ("~" prefix) that are empty or do not compile.
+func ValidateServerAlias(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if err := ValidateServerName(value); err != nil {
+		return err
+	}
+	if strings.ContainsAny(value, "{}") {
+		return fmt.Errorf("value %s is invalid server alias: curly braces are not allowed", value)
+	}
+	if pattern, isRegex := strings.CutPrefix(value, "~"); isRegex {
+		if pattern == "" {
+			return fmt.Errorf("value %s is invalid server alias: empty regex", value)
+		}
+		if err := checkServerAliasRegex(pattern); err != nil {
+			return fmt.Errorf("value %s is invalid server alias: %w", value, err)
+		}
+		return nil
+	}
+	if value == "." || (strings.HasPrefix(value, "*") && (len(value) < 3 || value[1] != '.')) {
+		return fmt.Errorf("value %s is invalid server alias: invalid wildcard", value)
+	}
+	return nil
+}
+
+// nginxConfigUnescaper mirrors the escape handling NGINX applies to configuration
+// tokens before the server_name regex is passed to PCRE.
+var nginxConfigUnescaper = strings.NewReplacer(`\\`, `\`, `\t`, "\t", `\r`, "\r", `\n`, "\n")
+
+// quantifiedFlagGroup matches a quantifier directly after an inline flag group,
+// e.g. "(?i)*", which Go applies to the previous atom but PCRE refuses.
+var quantifiedFlagGroup = regexp.MustCompile(`\(\?[imsU-]*\)[*+?]`)
+
+// checkServerAliasRegex compiles the regex NGINX would see and rejects
+// constructs Go accepts but PCRE refuses, like quantified anchors ("^+", "$?").
+func checkServerAliasRegex(pattern string) error {
+	pattern = nginxConfigUnescaper.Replace(pattern)
+	if quantifiedFlagGroup.MatchString(pattern) {
+		return fmt.Errorf("nothing to repeat in %s", pattern)
+	}
+	if err := checkPOSIXBrackets(pattern); err != nil {
+		return err
+	}
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return err
+	}
+	return checkRepeatedAssertion(re)
+}
+
+// checkPOSIXBrackets rejects POSIX bracket expressions that PCRE refuses but Go
+// accepts: "[:name:]" outside a character class, "[.x.]" and "[=x=]".
+func checkPOSIXBrackets(pattern string) error {
+	inClass := false
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '[':
+			if end := posixBracketEnd(pattern, i); end > 0 {
+				if !inClass || pattern[i+1] != ':' {
+					return fmt.Errorf("unsupported POSIX bracket expression in %s", pattern)
+				}
+				i = end
+				continue
+			}
+			if !inClass {
+				inClass = true
+				if i+1 < len(pattern) && pattern[i+1] == '^' {
+					i++
+				}
+				if i+1 < len(pattern) && pattern[i+1] == ']' {
+					i++
+				}
+			}
+		case ']':
+			inClass = false
+		}
+	}
+	return nil
+}
+
+// posixBracketEnd returns the index of the closing "]" when pattern[start:]
+// starts a POSIX bracket expression such as "[:alpha:]", or -1 otherwise.
+func posixBracketEnd(pattern string, start int) int {
+	if start+1 >= len(pattern) || !strings.ContainsRune(":.=", rune(pattern[start+1])) {
+		return -1
+	}
+	term := pattern[start+1]
+	for i := start + 2; i < len(pattern); i++ {
+		next := byte(0)
+		if i+1 < len(pattern) {
+			next = pattern[i+1]
+		}
+		switch {
+		case pattern[i] == '\\' && (next == ']' || next == '\\'):
+			i++
+		case pattern[i] == ']' || (pattern[i] == '[' && next == term):
+			return -1
+		case pattern[i] == term && next == ']':
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func checkRepeatedAssertion(re *syntax.Regexp) error {
+	switch re.Op {
+	case syntax.OpStar, syntax.OpPlus, syntax.OpQuest, syntax.OpRepeat:
+		switch re.Sub[0].Op {
+		case syntax.OpBeginLine, syntax.OpEndLine, syntax.OpBeginText, syntax.OpEndText,
+			syntax.OpWordBoundary, syntax.OpNoWordBoundary, syntax.OpEmptyMatch:
+			return fmt.Errorf("nothing to repeat in %s", re)
+		}
+	}
+	for _, sub := range re.Sub {
+		if err := checkRepeatedAssertion(sub); err != nil {
+			return err
+		}
 	}
 	return nil
 }
