@@ -90,41 +90,28 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
 		ing = f.EnsureIngress(ing)
 
-		f.WaitForNginxServer(host,
-			func(server string) bool {
-				return strings.Contains(server, fmt.Sprintf("server_name %v", host)) &&
-					!strings.Contains(server, "mirror /_mirror-") &&
-					!strings.Contains(server, "10246")
-			})
+		// an Ingress with an invalid annotation value is not loaded at all
+		framework.Sleep()
 
-		f.WaitForNginxConfiguration(func(cfg string) bool {
-			return !strings.Contains(cfg, fmt.Sprintf("/_mirror-%v", ing.UID))
-		})
-	})
+		cfg, err := f.ExecIngressPod("cat /etc/nginx/nginx.conf")
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.NotContains(ginkgo.GinkgoT(), cfg, fmt.Sprintf("/_mirror-%v", ing.UID))
+		assert.NotContains(ginkgo.GinkgoT(), cfg, "10246/configuration")
+		assert.NotContains(ginkgo.GinkgoT(), cfg, fmt.Sprintf("## start server %v", host))
 
-	ginkgo.It("should keep the controller-generated backends after posting to an ingress with a rejected mirror-target", func() {
-		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target": "http://127.0.0.1:10246/configuration/backends",
-		}
-
-		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
-		f.EnsureIngress(ing)
-
-		f.WaitForNginxServer(host,
-			func(server string) bool {
-				return strings.Contains(server, fmt.Sprintf("server_name %v", host)) &&
-					!strings.Contains(server, "mirror /_mirror-")
-			})
+		logs, err := f.NginxLogs()
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.Contains(ginkgo.GinkgoT(), logs, "must not be a loopback, unspecified or link-local address")
 
 		f.HTTPTestClient().
 			DoRequest(http.MethodPost, "/").
 			WithHeader("Host", host).
 			Expect().
-			Status(http.StatusOK)
+			Status(http.StatusNotFound)
 
 		output, err := f.ExecIngressPod("/dbg backends list")
 		assert.Nil(ginkgo.GinkgoT(), err)
 		assert.NotContains(ginkgo.GinkgoT(), output, "Nginx returned code")
-		assert.Contains(ginkgo.GinkgoT(), output, fmt.Sprintf("%v-%v-80", f.Namespace, framework.EchoService))
+		assert.Contains(ginkgo.GinkgoT(), output, "upstream-default-backend")
 	})
 })
