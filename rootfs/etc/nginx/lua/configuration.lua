@@ -220,7 +220,24 @@ local function handle_backends()
   ngx.status = ngx.HTTP_CREATED
 end
 
+-- the controller authenticates with a per-start random token from cfg.json,
+-- so nothing proxied through NGINX (e.g. a mirror) can drive this endpoint
+local function is_authorized()
+  local token = _M.configuration_token
+  if type(token) ~= "string" or token == "" then
+    return false
+  end
+
+  return ngx.var.http_x_ingress_nginx_configuration_token == token
+end
+
 function _M.call()
+  if not is_authorized() then
+    ngx.status = ngx.HTTP_UNAUTHORIZED
+    ngx.print("Unauthorized")
+    return
+  end
+
   if ngx.var.request_method ~= "POST" and ngx.var.request_method ~= "GET" then
     ngx.status = ngx.HTTP_BAD_REQUEST
     ngx.print("Only POST and GET requests are allowed!")

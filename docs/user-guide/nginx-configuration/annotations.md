@@ -947,6 +947,8 @@ nginx.ingress.kubernetes.io/mirror-host: "test.env.com"
 
 **Note:** The mirror directive will be applied to all paths within the ingress resource.
 
+**Note:** `mirror-target` must be an `http` or `https` URL with a static host. Targets that point at the controller pod itself (`localhost`, loopback, unspecified or link-local addresses, unix sockets) or at the internal status (`--status-port`, default `10246`) and stream (`--stream-port`, default `10247`) ports are rejected, and so are `mirror-host` values that name a loopback or link-local address. Variables are only allowed after the host and port, e.g. `$request_uri`.
+
 The request sent to the mirror is linked to the original request. If you have a slow mirror backend, then the original request will throttle.
 
 For more information on the mirror module see [ngx_http_mirror_module](https://nginx.org/en/docs/http/ngx_http_mirror_module.html)

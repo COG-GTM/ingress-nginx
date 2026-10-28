@@ -18,9 +18,11 @@ package annotations
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/onsi/ginkgo/v2"
+	"github.com/stretchr/testify/assert"
 
 	"k8s.io/ingress-nginx/test/e2e/framework"
 )
@@ -33,9 +35,9 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 		f.NewEchoDeployment()
 	})
 
-	ginkgo.It("should set mirror-target to http://localhost/mirror", func() {
+	ginkgo.It("should set mirror-target to http://192.0.2.1/mirror", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target": "http://localhost/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target": "http://192.0.2.1/mirror",
 		}
 
 		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
@@ -66,7 +68,7 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 
 	ginkgo.It("should disable mirror-request-body", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target":       "http://localhost/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target":       "http://192.0.2.1/mirror",
 			"nginx.ingress.kubernetes.io/mirror-request-body": "off",
 		}
 
@@ -78,5 +80,38 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 				return strings.Contains(server, fmt.Sprintf("mirror /_mirror-%v;", ing.UID)) &&
 					strings.Contains(server, "mirror_request_body off;")
 			})
+	})
+
+	ginkgo.It("should reject mirror-target pointing to the internal configuration endpoint", func() {
+		annotations := map[string]string{
+			"nginx.ingress.kubernetes.io/mirror-target": "http://127.0.0.1:10246/configuration/backends",
+		}
+
+		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
+		ing = f.EnsureIngress(ing)
+
+		// an Ingress with an invalid annotation value is not loaded at all
+		framework.Sleep()
+
+		cfg, err := f.ExecIngressPod("cat /etc/nginx/nginx.conf")
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.NotContains(ginkgo.GinkgoT(), cfg, fmt.Sprintf("/_mirror-%v", ing.UID))
+		assert.NotContains(ginkgo.GinkgoT(), cfg, "10246/configuration")
+		assert.NotContains(ginkgo.GinkgoT(), cfg, fmt.Sprintf("## start server %v", host))
+
+		logs, err := f.NginxLogs()
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.Contains(ginkgo.GinkgoT(), logs, "must not be a loopback, unspecified or link-local address")
+
+		f.HTTPTestClient().
+			DoRequest(http.MethodPost, "/").
+			WithHeader("Host", host).
+			Expect().
+			Status(http.StatusNotFound)
+
+		output, err := f.ExecIngressPod("/dbg backends list")
+		assert.Nil(ginkgo.GinkgoT(), err)
+		assert.NotContains(ginkgo.GinkgoT(), output, "Nginx returned code")
+		assert.Contains(ginkgo.GinkgoT(), output, "upstream-default-backend")
 	})
 })

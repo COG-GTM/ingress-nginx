@@ -18,13 +18,17 @@ package mirror
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	networking "k8s.io/api/networking/v1"
 	"k8s.io/ingress-nginx/internal/ingress/annotations/parser"
 	"k8s.io/ingress-nginx/internal/ingress/errors"
 	"k8s.io/ingress-nginx/internal/ingress/resolver"
+	"k8s.io/ingress-nginx/internal/nginx"
 	"k8s.io/klog/v2"
 )
 
@@ -130,9 +134,16 @@ func (a mirror) Parse(ing *networking.Ingress) (interface{}, error) {
 	if err != nil {
 		if errors.IsValidationError(err) {
 			klog.Warningf("annotation %s contains invalid value, defaulting", mirrorTargetAnnotation)
-		} else {
-			config.Target = ""
-			config.Source = ""
+		}
+		config.Target = ""
+		config.Source = ""
+	}
+
+	if config.Target != "" {
+		if err := validateMirrorTarget(config.Target); err != nil {
+			return &Config{RequestBody: config.RequestBody}, errors.ValidationError{
+				Reason: fmt.Errorf("annotation %s: %w", mirrorTargetAnnotation, err),
+			}
 		}
 	}
 
@@ -141,20 +152,123 @@ func (a mirror) Parse(ing *networking.Ingress) (interface{}, error) {
 		if errors.IsValidationError(err) {
 			klog.Warningf("annotation %s contains invalid value, defaulting", mirrorHostAnnotation)
 		}
+		config.Host = ""
 		if config.Target != "" {
 			target := strings.Split(config.Target, "$")
 
 			url, err := parser.StringToURL(target[0])
-			if err != nil {
-				config.Host = ""
-			} else {
+			if err == nil {
 				config.Host = url.Hostname()
 			}
+		}
+	} else if err := validateMirrorHost(config.Host); err != nil {
+		return &Config{RequestBody: config.RequestBody}, errors.ValidationError{
+			Reason: fmt.Errorf("annotation %s: %w", mirrorHostAnnotation, err),
 		}
 	}
 
 	return config, nil
 }
+
+// validateMirrorTarget rejects mirror targets that point at the controller pod
+// itself (loopback, unspecified or link-local addresses, unix sockets) or at the
+// internal NGINX status/configuration and stream ports. The mirror location uses a
+// static proxy_pass, so none of the Lua balancer protections apply to it.
+func validateMirrorTarget(target string) error {
+	// NGINX variables cannot be resolved here; only the static prefix is checked
+	// and a variable that is part of the scheme, host or port is rejected.
+	static := strings.SplitN(target, "$", 2)[0]
+
+	u, err := url.Parse(static)
+	if err != nil {
+		return fmt.Errorf("invalid mirror target %q: %w", target, err)
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("mirror target %q must use the http or https scheme", target)
+	}
+
+	if u.User != nil {
+		return fmt.Errorf("mirror target %q must not contain user information", target)
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("mirror target %q must contain a static host", target)
+	}
+
+	if static != target && u.Path == "" && u.RawQuery == "" && !uriVariable.MatchString(target[len(static):]) {
+		return fmt.Errorf("mirror target %q must not use variables in the host or port", target)
+	}
+
+	if err := validateMirrorHost(host); err != nil {
+		return err
+	}
+
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("mirror target %q has an invalid port", target)
+	}
+
+	if p == nginx.StatusPort || p == nginx.StreamPort {
+		return fmt.Errorf("mirror target %q must not use the internal port %d", target, p)
+	}
+
+	return nil
+}
+
+// validateMirrorHost rejects host names that refer to the controller pod itself.
+func validateMirrorHost(host string) error {
+	h := strings.TrimSuffix(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if h == "" {
+		return nil
+	}
+
+	// NGINX treats "unix:" as a unix domain socket in proxy_pass
+	if h == "unix" || strings.HasPrefix(h, "unix:") {
+		return fmt.Errorf("mirror host %q must not be a unix socket", host)
+	}
+
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return fmt.Errorf("mirror host %q must not be a loopback address", host)
+	}
+
+	if i := strings.IndexByte(h, '%'); i >= 0 {
+		h = h[:i]
+	}
+
+	if ip := net.ParseIP(h); ip != nil {
+		if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+			return fmt.Errorf("mirror host %q must not be a loopback, unspecified or link-local address", host)
+		}
+		return nil
+	}
+
+	// The resolver accepts numeric shorthands such as 127.1, 2130706433 or
+	// 0x7f000001 for IPv4 addresses. No valid top level domain is numeric.
+	labels := strings.Split(h, ".")
+	if numericLabel.MatchString(labels[len(labels)-1]) {
+		return fmt.Errorf("mirror host %q is not a valid IP address or host name", host)
+	}
+
+	return nil
+}
+
+var (
+	numericLabel = regexp.MustCompile(`^(0x[\da-f]*|\d+)$`)
+	// variables that always start with "/" and so cannot change the host or port
+	uriVariable = regexp.MustCompile(`^\$(request_uri|uri|document_uri)\b`)
+)
 
 func (a mirror) GetDocumentation() parser.AnnotationFields {
 	return a.annotationConfig.Annotations

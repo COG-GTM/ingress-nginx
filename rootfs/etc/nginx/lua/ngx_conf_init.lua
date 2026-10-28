@@ -27,6 +27,7 @@ else
     error("required status port not found")
   end
   configuration.prohibited_localhost_port = configfile.listen_ports.status_port
+  configuration.configuration_token = configfile.configuration_token
 end
 ok, res = pcall(require, "balancer")
 if not ok then

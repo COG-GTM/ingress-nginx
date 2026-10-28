@@ -98,9 +98,8 @@ func rlimitMaxNumFiles() int {
 }
 
 const (
-	defBinary  = "/usr/bin/nginx"
-	cfgPath    = "/etc/nginx/nginx.conf"
-	luaCfgPath = "/etc/nginx/lua/cfg.json"
+	defBinary = "/usr/bin/nginx"
+	cfgPath   = "/etc/nginx/nginx.conf"
 )
 
 // NginxExecTester defines the interface to execute
