@@ -141,7 +141,11 @@ func TestParseUntrustedUID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	source := result.(*Config).Source
+	cfg, ok := result.(*Config)
+	if !ok {
+		t.Fatalf("expected *Config, got %T", result)
+	}
+	source := cfg.Source
 	if !regexp.MustCompile(`^/_mirror-[0-9a-f]{64}$`).MatchString(source) {
 		t.Errorf("expected mirror source derived from a hash of the uid, got %q", source)
 	}
