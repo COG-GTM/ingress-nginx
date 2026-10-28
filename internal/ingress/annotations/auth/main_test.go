@@ -134,6 +134,91 @@ func TestIngressAuthBadAuthType(t *testing.T) {
 	}
 }
 
+func TestIngressAuthTypeMustMatchExactly(t *testing.T) {
+	_, dir, _ := dummySecretContent(t)
+	defer os.RemoveAll(dir)
+
+	for _, at := range []string{"basicx", "xdigest", "basic digest", "basic\n", "Basic", "digest-sha"} {
+		ing := buildIngress()
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = at
+		data[parser.GetAnnotationWithPrefix(AuthSecretAnnotation)] = demoSecret
+		ing.SetAnnotations(data)
+
+		expected := ing_errors.NewValidationError("nginx.ingress.kubernetes.io/auth-type")
+		_, err := NewParser(dir, &mockSecret{}).Parse(ing)
+		if err == nil || err.Error() != expected.Error() {
+			t.Errorf("auth-type %q: expected '%v' but got '%v'", at, expected, err)
+		}
+	}
+}
+
+func TestIngressAuthTypeMustMatchExactlyWithoutValidation(t *testing.T) {
+	parser.EnableAnnotationValidation = false
+	defer func() { parser.EnableAnnotationValidation = parser.DefaultEnableAnnotationValidation }()
+
+	_, dir, _ := dummySecretContent(t)
+	defer os.RemoveAll(dir)
+
+	for _, at := range []string{"basicx", "xdigest", "basic digest", "Basic"} {
+		ing := buildIngress()
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = at
+		data[parser.GetAnnotationWithPrefix(AuthSecretAnnotation)] = demoSecret
+		ing.SetAnnotations(data)
+
+		_, err := NewParser(dir, &mockSecret{}).Parse(ing)
+		if !ing_errors.IsLocationDenied(err) {
+			t.Errorf("auth-type %q: expected a location denied error but got '%v'", at, err)
+		}
+	}
+}
+
+func TestIngressAuthValidTypes(t *testing.T) {
+	_, dir, _ := dummySecretContent(t)
+	defer os.RemoveAll(dir)
+
+	for _, at := range []string{"basic", "digest"} {
+		ing := buildIngress()
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = at
+		data[parser.GetAnnotationWithPrefix(AuthSecretAnnotation)] = demoSecret
+		ing.SetAnnotations(data)
+
+		i, err := NewParser(dir, &mockSecret{}).Parse(ing)
+		if err != nil {
+			t.Fatalf("auth-type %q: unexpected error: %v", at, err)
+		}
+		cfg, ok := i.(*Config)
+		if !ok {
+			t.Fatalf("auth-type %q: expected a Config but got %T", at, i)
+		}
+		if cfg.Type != at {
+			t.Errorf("auth-type %q: expected Type %q but got %q", at, at, cfg.Type)
+		}
+	}
+}
+
+func TestIngressAuthSecretTypeMustMatchExactly(t *testing.T) {
+	_, dir, _ := dummySecretContent(t)
+	defer os.RemoveAll(dir)
+
+	for _, st := range []string{"auth-filex", "xauth-map", "auth-file auth-map"} {
+		ing := buildIngress()
+		data := map[string]string{}
+		data[parser.GetAnnotationWithPrefix(authTypeAnnotation)] = authType
+		data[parser.GetAnnotationWithPrefix(authSecretTypeAnnotation)] = st
+		data[parser.GetAnnotationWithPrefix(AuthSecretAnnotation)] = demoSecret
+		ing.SetAnnotations(data)
+
+		expected := ing_errors.NewValidationError("nginx.ingress.kubernetes.io/auth-secret-type")
+		_, err := NewParser(dir, &mockSecret{}).Parse(ing)
+		if err == nil || err.Error() != expected.Error() {
+			t.Errorf("auth-secret-type %q: expected '%v' but got '%v'", st, expected, err)
+		}
+	}
+}
+
 func TestIngressInvalidRealm(t *testing.T) {
 	ing := buildIngress()
 

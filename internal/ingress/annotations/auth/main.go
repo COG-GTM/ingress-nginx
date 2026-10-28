@@ -41,8 +41,8 @@ const (
 )
 
 var (
-	authTypeRegex       = regexp.MustCompile(`basic|digest`)
-	authSecretTypeRegex = regexp.MustCompile(`auth-file|auth-map`)
+	authTypeRegex       = regexp.MustCompile(`^(basic|digest)$`)
+	authSecretTypeRegex = regexp.MustCompile(`^(auth-file|auth-map)$`)
 
 	// AuthDirectory default directory used to store files
 	// to authenticate request
@@ -85,6 +85,9 @@ var authSecretAnnotations = parser.Annotation{
 const (
 	fileAuth = "auth-file"
 	mapAuth  = "auth-map"
+
+	basicAuth  = "basic"
+	digestAuth = "digest"
 )
 
 // Config returns authentication configuration for an Ingress rule
@@ -152,7 +155,7 @@ func (a auth) Parse(ing *networking.Ingress) (interface{}, error) {
 		return nil, err
 	}
 
-	if !authTypeRegex.MatchString(at) {
+	if at != basicAuth && at != digestAuth {
 		return nil, ing_errors.NewLocationDenied("invalid authentication type")
 	}
 
