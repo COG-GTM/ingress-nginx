@@ -247,7 +247,9 @@ local function fetch_and_cache_ocsp_response(uid, der_cert)
       "consider increasing shared dictionary size for 'ocsp_response_cache'")
   end
 
-  ocsp_response_cache:delete(ocsp_fetch_lock_key(uid))
+  if success then
+    ocsp_response_cache:delete(ocsp_fetch_lock_key(uid))
+  end
 end
 
 -- schedule_ocsp_fetch enqueues at most one fetch per certificate across all
