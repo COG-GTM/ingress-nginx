@@ -81,13 +81,6 @@ local function sync_backend(backend)
   end
 
   ngx.log(ngx.INFO, "sync tcp/udp backend: ", backend.name)
-
-  if is_backend_with_external_name(backend) then
-    backend = resolve_external_names(backend)
-  end
-
-  backend.endpoints = format_ipv6_endpoints(backend.endpoints)
-
   local implementation = get_implementation(backend)
   local balancer = balancers[backend.name]
 
@@ -105,6 +98,12 @@ local function sync_backend(backend)
     balancers[backend.name] = implementation:new(backend)
     return
   end
+
+  if is_backend_with_external_name(backend) then
+    backend = resolve_external_names(backend)
+  end
+
+  backend.endpoints = format_ipv6_endpoints(backend.endpoints)
 
   balancer:sync(backend)
 end

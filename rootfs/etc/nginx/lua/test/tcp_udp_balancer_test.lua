@@ -27,10 +27,13 @@ describe("TCP/UDP Balancer", function()
     local function balance_to(address, port)
       local name = "tcp-test-" .. address .. "-" .. port
       mock_upstream(name)
-      tcp_udp_balancer.sync_backend({
-        name = name,
-        endpoints = { { address = address, port = port } },
-      })
+      -- the first sync only creates the balancer, the second one formats endpoints
+      for _ = 1, 2 do
+        tcp_udp_balancer.sync_backend({
+          name = name,
+          endpoints = { { address = address, port = port } },
+        })
+      end
       tcp_udp_balancer.balance()
     end
 
