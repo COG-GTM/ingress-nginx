@@ -538,7 +538,7 @@ func (tl *TLSListener) SetClientCA(caPath string) error {
 		}
 	})
 	if err != nil {
-		klog.Errorf("unexpected error watching client CA file %v: %v", caPath, err)
+		return fmt.Errorf("watching client CA file %v: %w", caPath, err)
 	}
 	return nil
 }
