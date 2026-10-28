@@ -1,5 +1,4 @@
 local cjson = require("cjson.safe")
-local certificate = require("certificate")
 
 local io = io
 local ngx = ngx
@@ -111,7 +110,7 @@ local function handle_servers()
     if success then
         -- delete ocsp cache after certificate_data:set succeed
         if is_renew then
-            certificate.invalidate_ocsp_response(uid)
+            require("certificate").invalidate_ocsp_response(uid)
         end
     else
       local err_msg = string.format("error setting certificate for %s: %s\n",
