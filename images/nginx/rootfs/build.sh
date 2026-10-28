@@ -101,6 +101,9 @@ export LUA_RESTY_IPMATCHER_VERSION=3e93c53eb8c9884efe939ef070486a0e507cc5be
 # Check for recent changes:  https://github.com/microsoft/mimalloc/compare/v2.1.7...master
 export MIMALOC_VERSION=v2.1.7
 
+# Check for recent changes: https://github.com/ssdeep-project/ssdeep/compare/release-2.14.1...master
+export SSDEEP_VERSION=release-2.14.1
+
 # Check on https://github.com/open-telemetry/opentelemetry-cpp
 export OPENTELEMETRY_CPP_VERSION="v1.11.0"
 # Check on https://github.com/open-telemetry/opentelemetry-proto
@@ -110,6 +113,10 @@ export BUILD_PATH=/tmp/build
 
 ARCH=$(uname -m)
 
+CHECKSUM_FAILURES=()
+
+# Downloads an archive, verifies its SHA-256 and extracts it. Mismatches are
+# collected so that all of them are reported before verify_sources aborts.
 get_src()
 {
   hash="$1"
@@ -120,9 +127,15 @@ get_src()
 
   echo "Downloading $url"
 
-  curl -sSL "$url" -o "$f"
-  # TODO: Reenable checksum verification but make it smarter
-  # echo "$hash  $f" | sha256sum -c - || exit 10
+  curl -fsSL --retry 3 "$url" -o "$f"
+  actual=$(sha256sum "$f" | cut -d' ' -f1)
+  if ! [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || [ "$actual" != "$hash" ]; then
+    echo "Checksum verification failed for $url: expected $hash, got $actual" >&2
+    CHECKSUM_FAILURES+=("$url")
+    rm -f "$f"
+    return 0
+  fi
+  echo "$f: OK"
   if [ ! -z "$dest" ]; then
         mkdir ${BUILD_PATH}/${dest}
         ARGS="-C ${BUILD_PATH}/${dest} --strip-components=1"
@@ -192,89 +205,103 @@ mkdir --verbose -p "$BUILD_PATH"
 cd "$BUILD_PATH"
 
 # download, verify and extract the source files
-get_src 66dc7081488811e9f925719e34d1b4504c2801c81dee2920e5452a86b11405ae \
+get_src 2fe2294f8af4144e7e842eaea884182a84ee7970e11046ba98194400902bbec0 \
         "https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz"
 
-get_src aa961eafb8317e0eb8da37eb6e2c9ff42267edd18b56947384e719b85188f58b \
+get_src faa2fcd5168b10764d35081356511d5f84db5c526a1aa4b6add2db94b6853b2b \
         "https://github.com/vision5/ngx_devel_kit/archive/$NDK_VERSION.tar.gz" "ngx_devel_kit"
 
-get_src abc123 \
+get_src f30cd88bf898a5726d245eba882b8e81012021eb00df34109f4dfb203f005cea \
         "https://github.com/open-telemetry/opentelemetry-cpp/archive/$OPENTELEMETRY_CPP_VERSION.tar.gz" "opentelemetry-cpp"
 
-get_src abc123 \
+get_src df491a05f3fcbf86cc5ba5c9de81f6a624d74d4773d7009d573e37d6e2b6af64 \
         "https://github.com/open-telemetry/opentelemetry-proto/archive/$OPENTELEMETRY_PROTO_VERSION.tar.gz" "opentelemetry-proto"
 
-get_src cd5e2cc834bcfa30149e7511f2b5a2183baf0b70dc091af717a89a64e44a2985 \
+get_src 30bd865639c3e62607bd8f8914176b5c5acea053faf6205fb3619ad581a6d852 \
         "https://github.com/openresty/set-misc-nginx-module/archive/$SETMISC_VERSION.tar.gz" "set-misc-nginx-module"
 
-get_src 0c0d2ced2ce895b3f45eb2b230cd90508ab2a773299f153de14a43e44c1209b3 \
+get_src cf6e169d6b350c06d0c730b0eaf4973394026ad40094cddd3b3a5b346577019d \
         "https://github.com/openresty/headers-more-nginx-module/archive/$MORE_HEADERS_VERSION.tar.gz" "headers-more-nginx-module"
 
 get_src f09851e6309560a8ff3e901548405066c83f1f6ff88aa7171e0763bd9514762b \
         "https://github.com/atomx/nginx-http-auth-digest/archive/$NGINX_DIGEST_AUTH.tar.gz" "nginx-http-auth-digest"
 
-get_src a98b48947359166326d58700ccdc27256d2648218072da138ab6b47de47fbd8f \
+get_src da2a26aa75884e1216941c7291b6e8b7fc4dd7163700a04191b92060b61fabb3 \
         "https://github.com/yaoweibin/ngx_http_substitutions_filter_module/archive/$NGINX_SUBSTITUTIONS.tar.gz" "ngx_http_substitutions_filter_module"
 
 get_src 32a42256616cc674dca24c8654397390adff15b888b77eb74e0687f023c8751b \
         "https://github.com/SpiderLabs/ModSecurity-nginx/archive/$MODSECURITY_VERSION.tar.gz" "ModSecurity-nginx"
 
-get_src bc764db42830aeaf74755754b900253c233ad57498debe7a441cee2c6f4b07c2 \
+get_src a75983287a2bdc5e964ace56a51b215dc2ec996639d4916cd393d6ebba94b565 \
         "https://github.com/openresty/lua-nginx-module/archive/$LUA_NGX_VERSION.tar.gz" "lua-nginx-module"
 
-get_src 01b715754a8248cc7228e0c8f97f7488ae429d90208de0481394e35d24cef32f \
+get_src 0f5b5356d3dfe19ccd945ec6a2fcf2c27e1a517aefccb798f934132f09bb78fa \
         "https://github.com/openresty/stream-lua-nginx-module/archive/$LUA_STREAM_NGX_VERSION.tar.gz" "stream-lua-nginx-module"
 
-get_src a92c9ee6682567605ece55d4eed5d1d54446ba6fba748cff0a2482aea5713d5f \
+get_src 41fd8c0edcd53e61ed5694ac8460043cc58fbc367acd7bb73e9c1a44c470168e \
         "https://github.com/openresty/lua-upstream-nginx-module/archive/$LUA_UPSTREAM_VERSION.tar.gz" "lua-upstream-nginx-module"
 
-get_src 77bbcbb24c3c78f51560017288f3118d995fe71240aa379f5818ff6b166712ff \
+get_src 3efddc4104a0ce720ddf4da3d9bce927f3c5816a8a45a043462ca58914cde271 \
         "https://github.com/openresty/luajit2/archive/$LUAJIT_VERSION.tar.gz" "luajit2"
 
 get_src b6c9c09fd43eb34a71e706ad780b2ead26549a9a9f59280fe558f5b7b980b7c6 \
         "https://github.com/leev/ngx_http_geoip2_module/archive/$GEOIP2_VERSION.tar.gz" "ngx_http_geoip2_module"
 
-get_src deb4ab1ffb9f3d962c4b4a2c4bdff692b86a209e3835ae71ebdf3b97189e40a9 \
+get_src 8b66eb1cd62876c31913381c3255b3c740854de1d5f6e4808e85fa38a4200b0c \
         "https://github.com/openresty/lua-resty-upload/archive/$LUA_RESTY_UPLOAD_VERSION.tar.gz" "lua-resty-upload"
 
-get_src bdbf271003d95aa91cab0a92f24dca129e99b33f79c13ebfcdbbcbb558129491 \
+get_src fbd0b12a46041713f1ea1405323343c5cf7c43fdd75dc4878f48640abdc2a387 \
         "https://github.com/openresty/lua-resty-string/archive/$LUA_RESTY_STRING_VERSION.tar.gz" "lua-resty-string"
 
-get_src 16d72ed133f0c6df376a327386c3ef4e9406cf51003a700737c3805770ade7c5 \
+get_src 32dcb6d8d264c2a334c0b1dca7aa6cce8d80e611d8d8146e7c85199858931f1f \
         "https://github.com/openresty/lua-resty-balancer/archive/$LUA_RESTY_BALANCER.tar.gz" "lua-resty-balancer"
 
-get_src 39baab9e2b31cc48cecf896cea40ef6e80559054fd8a6e440cc804a858ea84d4 \
+get_src 62230dee287edcabb2dcb9c3b44ad162a6cc7ad2b8f508bc52e592f0137aa6a1 \
         "https://github.com/openresty/lua-resty-core/archive/$LUA_RESTY_CORE.tar.gz" "lua-resty-core"
 
-get_src a77b9de160d81712f2f442e1de8b78a5a7ef0d08f13430ff619f79235db974d4 \
+get_src 8af6aae85258f796d865073a1a451ab29502cae2e88ed89867af8448f2a7138c \
         "https://github.com/openresty/lua-cjson/archive/$LUA_CJSON_VERSION.tar.gz" "lua-cjson"
 
-get_src 5ed48c36231e2622b001308622d46a0077525ac2f751e8cc0c9905914254baa4 \
+get_src c0217456f4c36bb9ebbf7dbcd733e3d70734330364c88df73e703c4777521ff9 \
         "https://github.com/cloudflare/lua-resty-cookie/archive/$LUA_RESTY_COOKIE_VERSION.tar.gz" "lua-resty-cookie"
 
-get_src 573184006b98ccee2594b0d134fa4d05e5d2afd5141cbad315051ccf7e9b6403 \
+get_src 3bf3781aa3cb5489ed0272cc1d6b194ffb1a83c29df68b84228487f98ed51e99 \
         "https://github.com/openresty/lua-resty-lrucache/archive/$LUA_RESTY_CACHE.tar.gz" "lua-resty-lrucache"
 
-get_src b4ddcd47db347e9adf5c1e1491a6279a6ae2a3aff3155ef77ea0a65c998a69c1 \
+get_src 670f174c797fca0ae864e497f17e5ab59beb3e8c92d36febabbe2113e1db4bc6 \
         "https://github.com/openresty/lua-resty-lock/archive/$LUA_RESTY_LOCK.tar.gz" "lua-resty-lock"
 
-get_src 70e9a01eb32ccade0d5116a25bcffde0445b94ad35035ce06b94ccd260ad1bf0 \
+get_src f2c81a4210e0e5d27f9bad6489d8679c595a0fcb957a642a62180e2cc99855cc \
         "https://github.com/openresty/lua-resty-dns/archive/$LUA_RESTY_DNS.tar.gz" "lua-resty-dns"
 
-get_src 9fcb6db95bc37b6fce77d3b3dc740d593f9d90dce0369b405eb04844d56ac43f \
+get_src f52a0538b20a2d45025f318c18a138b78f6f88f07713dd0ed502183cb3d16f17 \
         "https://github.com/ledgetech/lua-resty-http/archive/$LUA_RESTY_HTTP.tar.gz" "lua-resty-http"
 
-get_src 02733575c4aed15f6cab662378e4b071c0a4a4d07940c4ef19a7319e9be943d4 \
+get_src b2158cf2da6385e8f302a6a9c8269b0453adf97db33d1d8d759b3b7e887701e3 \
         "https://github.com/openresty/lua-resty-memcached/archive/$LUA_RESTY_MEMCACHED_VERSION.tar.gz" "lua-resty-memcached"
 
-get_src c15aed1a01c88a3a6387d9af67a957dff670357f5fdb4ee182beb44635eef3f1 \
+get_src a22b4b61e2a07dcdc56036ed60acf17beb50d7056f8f6551eb98cb0f2945d16c \
         "https://github.com/openresty/lua-resty-redis/archive/$LUA_RESTY_REDIS_VERSION.tar.gz" "lua-resty-redis"
 
-get_src efb767487ea3f6031577b9b224467ddbda2ad51a41c5867a47582d4ad85d609e \
+get_src bf4f89c0c00d1e986260d22180cbccbd2016eb054b5c2adcc1b6ee0ff773032f \
         "https://github.com/api7/lua-resty-ipmatcher/archive/$LUA_RESTY_IPMATCHER_VERSION.tar.gz" "lua-resty-ipmatcher"
 
-get_src d74f86ada2329016068bc5a243268f1f555edd620b6a7d6ce89295e7d6cf18da \
+get_src 0eed39319f139afde8515010ff59baf24de9e47ea316a315398e8027d198202d \
         "https://github.com/microsoft/mimalloc/archive/${MIMALOC_VERSION}.tar.gz" "mimalloc"
+
+get_src d96f667a8427ad96da197884574c7ca8c7518a37d9ac8593b6ea77e7945720a4 \
+        "https://github.com/ssdeep-project/ssdeep/archive/$SSDEEP_VERSION.tar.gz" "ssdeep"
+
+verify_sources()
+{
+  if [ ${#CHECKSUM_FAILURES[@]} -ne 0 ]; then
+    printf 'Checksum verification failed for:\n' >&2
+    printf '  %s\n' "${CHECKSUM_FAILURES[@]}" >&2
+    exit 10
+  fi
+}
+
+verify_sources
 
 # improve compilation times
 CORES=$(($(grep -c ^processor /proc/cpuinfo) - 1))
@@ -328,9 +355,7 @@ git reset --hard 63ca02abdcf79c9e788d2eedcc388d2335902e52
 git submodule init
 git submodule update
 
-cd "$BUILD_PATH"
-git clone --depth=1 https://github.com/ssdeep-project/ssdeep
-cd ssdeep/
+cd "$BUILD_PATH/ssdeep"
 
 ./bootstrap
 ./configure
