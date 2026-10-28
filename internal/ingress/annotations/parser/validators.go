@@ -150,16 +150,13 @@ var nginxConfigUnescaper = strings.NewReplacer(`\\`, `\`, `\t`, "\t", `\r`, "\r"
 
 // quantifiedFlagGroup matches a quantifier directly after an inline flag group,
 // e.g. "(?i)*", which Go applies to the previous atom but PCRE refuses.
-var quantifiedFlagGroup = regexp.MustCompile(`\(\?[imsU-]*\)[*+?]`)
+var quantifiedFlagGroup = regexp.MustCompile(`^\(\?[imsU-]*\)[*+?]`)
 
 // checkServerAliasRegex compiles the regex NGINX would see and rejects
 // constructs Go accepts but PCRE refuses, like quantified anchors ("^+", "$?").
 func checkServerAliasRegex(pattern string) error {
 	pattern = nginxConfigUnescaper.Replace(pattern)
-	if quantifiedFlagGroup.MatchString(pattern) {
-		return fmt.Errorf("nothing to repeat in %s", pattern)
-	}
-	if err := checkPOSIXBrackets(pattern); err != nil {
+	if err := checkPCREOnlySyntax(pattern); err != nil {
 		return err
 	}
 	re, err := syntax.Parse(pattern, syntax.Perl)
@@ -169,14 +166,19 @@ func checkServerAliasRegex(pattern string) error {
 	return checkRepeatedAssertion(re)
 }
 
-// checkPOSIXBrackets rejects POSIX bracket expressions that PCRE refuses but Go
-// accepts: "[:name:]" outside a character class, "[.x.]" and "[=x=]".
-func checkPOSIXBrackets(pattern string) error {
+// checkPCREOnlySyntax rejects constructs outside character classes that PCRE
+// refuses but Go accepts: quantified inline flag groups such as "(?i)*", and
+// POSIX bracket expressions "[:name:]" outside a class, "[.x.]" and "[=x=]".
+func checkPCREOnlySyntax(pattern string) error {
 	inClass := false
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
 		case '\\':
 			i++
+		case '(':
+			if !inClass && quantifiedFlagGroup.MatchString(pattern[i:]) {
+				return fmt.Errorf("nothing to repeat in %s", pattern)
+			}
 		case '[':
 			if end := posixBracketEnd(pattern, i); end > 0 {
 				if !inClass || pattern[i+1] != ':' {
@@ -230,7 +232,7 @@ func checkRepeatedAssertion(re *syntax.Regexp) error {
 	case syntax.OpStar, syntax.OpPlus, syntax.OpQuest, syntax.OpRepeat:
 		switch re.Sub[0].Op {
 		case syntax.OpBeginLine, syntax.OpEndLine, syntax.OpBeginText, syntax.OpEndText,
-			syntax.OpWordBoundary, syntax.OpNoWordBoundary, syntax.OpEmptyMatch:
+			syntax.OpWordBoundary, syntax.OpNoWordBoundary:
 			return fmt.Errorf("nothing to repeat in %s", re)
 		}
 	}

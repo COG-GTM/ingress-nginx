@@ -93,6 +93,11 @@ func TestValidateServerAlias(t *testing.T) {
 		`~^[[:alpha:]]+\.example\.com$`,
 		`~^a[.]b[=]c[^]x]$`,
 		"~^(?i)www\\.example\\.com$",
+		"~^[(?i)*]+$",
+		"~[a(?i)+]b",
+		"~(?:)*",
+		`~^(?:)*example\\.com$`,
+		"~a(?:|)+b",
 	}
 	for _, value := range valid {
 		if err := ValidateServerAlias(value); err != nil {
