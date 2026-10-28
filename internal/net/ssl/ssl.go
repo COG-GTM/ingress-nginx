@@ -532,11 +532,28 @@ func NewTLSListenerWithClientCA(certificate, key, clientCA string) *TLSListener 
 	l.clientCAPath = clientCA
 	l.loadClientCA()
 
-	_, err := file.NewFileWatcher(clientCA, l.loadClientCA)
-	if err != nil {
-		klog.Errorf("unexpected error: %v", err)
+	if _, err := file.NewFileWatcher(clientCA, l.loadClientCA); err != nil {
+		klog.ErrorS(err, "failed to watch webhook client CA bundle, retrying", "path", clientCA)
+		go l.watchClientCAWhenAvailable(clientCAWatchRetryInterval)
 	}
 	return l
+}
+
+const clientCAWatchRetryInterval = 10 * time.Second
+
+// watchClientCAWhenAvailable retries loading and watching the client CA bundle until
+// the file exists, so a bundle added after startup is picked up without a restart.
+func (tl *TLSListener) watchClientCAWhenAvailable(interval time.Duration) {
+	for {
+		time.Sleep(interval)
+		if _, err := os.Stat(tl.clientCAPath); err != nil {
+			continue
+		}
+		tl.loadClientCA()
+		if _, err := file.NewFileWatcher(tl.clientCAPath, tl.loadClientCA); err == nil {
+			return
+		}
+	}
 }
 
 // GetCertificate implements the tls.Config.GetCertificate interface

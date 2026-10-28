@@ -614,3 +614,35 @@ func TestTLSListenerWithClientCA(t *testing.T) {
 		}
 	})
 }
+
+func TestTLSListenerClientCAAddedAfterStartup(t *testing.T) {
+	dir := t.TempDir()
+	clientCAPath := dir + "/ca.crt"
+	_, _, caPEM := newTestCA(t, "webhook-client-ca")
+
+	listener := &TLSListener{clientCAPath: clientCAPath}
+	listener.loadClientCA()
+	if _, err := listener.getConfigForClient(nil); err == nil {
+		t.Fatalf("expected handshakes to be rejected while the client CA is missing")
+	}
+
+	go listener.watchClientCAWhenAvailable(10 * time.Millisecond)
+	if err := os.WriteFile(clientCAPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		cfg, err := listener.getConfigForClient(nil)
+		if err == nil {
+			if cfg.ClientAuth != tls.RequireAndVerifyClientCert || cfg.ClientCAs == nil {
+				t.Fatalf("unexpected TLS config %+v", cfg)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("client CA added after startup was not loaded: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

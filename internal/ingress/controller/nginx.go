@@ -689,7 +689,7 @@ var codeLoadingDirective = regexp.MustCompile(`(?:^|[\s;{}])(ssl_engine|load_mod
 // arbitrary shared objects: any ssl_engine directive, and load_module directives that
 // point outside of allowedModulesDir.
 func checkForbiddenDirectives(cfg []byte) error {
-	for _, m := range codeLoadingDirective.FindAllSubmatch(cfg, -1) {
+	for _, m := range codeLoadingDirective.FindAllSubmatch(stripNginxComments(cfg), -1) {
 		directive, arg := string(m[1]), strings.Trim(strings.TrimSpace(string(m[2])), `"'`)
 		if directive == "load_module" && strings.HasPrefix(arg, allowedModulesDir) &&
 			filepath.Clean(arg) == arg && !strings.ContainsAny(arg, " \t\r\n") {
@@ -698,6 +698,47 @@ func checkForbiddenDirectives(cfg []byte) error {
 		return fmt.Errorf("invalid NGINX configuration: directive %q with argument %q is not allowed", directive, arg)
 	}
 	return nil
+}
+
+// stripNginxComments blanks out NGINX comments following the tokenizer rules of
+// ngx_conf_read_token: '#' only starts a comment at the beginning of a token and
+// quoted strings (with backslash escapes) are kept intact.
+func stripNginxComments(cfg []byte) []byte {
+	out := make([]byte, len(cfg))
+	copy(out, cfg)
+
+	tokenStart, inComment := true, false
+	var quote byte
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch {
+		case inComment:
+			if c == '\n' {
+				inComment, tokenStart = false, true
+			} else {
+				out[i] = ' '
+			}
+		case quote != 0:
+			if c == '\\' {
+				i++
+			} else if c == quote {
+				quote, tokenStart = 0, false
+			}
+		case c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ';' || c == '{' || c == '}':
+			tokenStart = true
+		case tokenStart && c == '#':
+			inComment = true
+			out[i] = ' '
+		case tokenStart && (c == '"' || c == '\''):
+			quote, tokenStart = c, false
+		case c == '\\':
+			tokenStart = false
+			i++
+		default:
+			tokenStart = false
+		}
+	}
+	return out
 }
 
 // OnUpdate is called by the synchronization loop whenever configuration

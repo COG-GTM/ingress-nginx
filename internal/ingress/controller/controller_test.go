@@ -181,6 +181,12 @@ func TestCheckForbiddenDirectives(t *testing.T) {
 		{"module outside modules dir", "load_module /tmp/evil.so;", true},
 		{"module path traversal", "load_module /etc/nginx/modules/../../../tmp/evil.so;", true},
 		{"module via proc", "load_module /proc/self/fd/7;", true},
+		{"commented ssl_engine", "http {\n    # ssl_engine old;\n}\n", false},
+		{"commented after directive", "worker_processes 1; # load_module /tmp/evil.so;\n", false},
+		{"directive after comment line", "# comment\nssl_engine x;", true},
+		{"hash inside a token is not a comment", "set $a x#; ssl_engine x;", true},
+		{"hash inside a quoted string is not a comment", "set $a \"x #\"; ssl_engine x;", true},
+		{"escaped quote inside a quoted string", "set $a \"x \\\" #\"; ssl_engine x;", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
