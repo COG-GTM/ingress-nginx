@@ -359,6 +359,46 @@ func TestCommonNameAnnotationValidator(t *testing.T) {
 			annotation: `CN=(api-one\.(asdf)?qwer\.webpage\.organization\.org)`,
 			wantErr:    false,
 		},
+		{
+			name:       "directive injection with newline",
+			annotation: "CN=a #(\n){}\n}\nssl_engine x;",
+			wantErr:    true,
+		},
+		{
+			name:       "semicolon",
+			annotation: `CN=(a);ssl_engine`,
+			wantErr:    true,
+		},
+		{
+			name:       "braces",
+			annotation: `CN=a{1}`,
+			wantErr:    true,
+		},
+		{
+			name:       "comment",
+			annotation: `CN=a#b`,
+			wantErr:    true,
+		},
+		{
+			name:       "space",
+			annotation: `CN=a b`,
+			wantErr:    true,
+		},
+		{
+			name:       "tab",
+			annotation: "CN=a\tb",
+			wantErr:    true,
+		},
+		{
+			name:       "quote",
+			annotation: `CN="a"`,
+			wantErr:    true,
+		},
+		{
+			name:       "anchored regex",
+			annotation: `CN=^my\.common\.name$`,
+			wantErr:    false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -74,6 +74,7 @@ They are set in the container spec of the `ingress-nginx-controller` Deployment 
 | `--validating-webhook`             | The address to start an admission controller on to validate incoming ingresses. Takes the form "<host>:port". If not provided, no admission controller is started. |
 | `--validating-webhook-certificate` | The path of the validating webhook certificate PEM. |
 | `--validating-webhook-key`         | The path of the validating webhook key PEM. |
+| `--validating-webhook-client-ca`   | The path of a CA bundle PEM used to verify client certificates presented to the validating webhook. If provided, callers (normally the Kubernetes API server) must present a client certificate signed by this CA. |
 | `--version`                        | Show release information about the Ingress-Nginx Controller and exit. |
 | `--watch-ingress-without-class`                        | Define if Ingress Controller should also watch for Ingresses without an IngressClass or the annotation specified. (default false) |
 | `--watch-namespace`                | Namespace the controller watches for updates to Kubernetes objects. This includes Ingresses, Services and all configuration resources. All namespaces are watched if this parameter is left empty. |

@@ -209,6 +209,14 @@ func (a authTLS) Parse(ing *networking.Ingress) (interface{}, error) {
 		config.MatchCN = ""
 	}
 
+	// MatchCN is rendered unquoted into nginx.conf, so it is always validated,
+	// even when annotation validation is globally disabled.
+	if config.MatchCN != "" {
+		if err := parser.CommonNameAnnotationValidator(config.MatchCN); err != nil {
+			return &Config{}, ing_errors.NewValidationError(parser.GetAnnotationWithPrefix(annotationAuthTLSMatchCN))
+		}
+	}
+
 	return config, nil
 }
 

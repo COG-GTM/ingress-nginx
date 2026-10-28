@@ -45,6 +45,9 @@ type AdmissionController interface {
 // https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#validatingadmissionwebhook
 type AdmissionControllerServer struct {
 	AdmissionController AdmissionController
+	// RequireClientCert rejects requests that did not present a verified
+	// TLS client certificate before the request body is read.
+	RequireClientCert bool
 }
 
 // NewAdmissionControllerServer instantiates an admission controller server with
@@ -58,6 +61,17 @@ func NewAdmissionControllerServer(ac AdmissionController) *AdmissionControllerSe
 // ServeHTTP implements http.Server method
 func (acs *AdmissionControllerServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer req.Body.Close()
+
+	if req.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if acs.RequireClientCert && (req.TLS == nil || len(req.TLS.VerifiedChains) == 0) {
+		klog.Warningf("Rejecting admission request from %v without a verified client certificate", req.RemoteAddr)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
 	data, err := io.ReadAll(req.Body)
 	if err != nil {
