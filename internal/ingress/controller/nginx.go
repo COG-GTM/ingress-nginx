@@ -458,8 +458,6 @@ func (n *NGINXController) DefaultEndpoint() ingress.Endpoint {
 //nolint:gocritic // the cfg shouldn't be changed, and shouldn't be mutated by other processes while being rendered.
 func (n *NGINXController) generateTemplate(cfg ngx_config.Configuration, ingressCfg ingress.Configuration) ([]byte, error) {
 	if n.cfg.EnableSSLPassthrough {
-		n.Proxy.SetTimeouts(cfg.ProxyProtocolHeaderTimeout, parseStreamTimeout(cfg.ProxyStreamTimeout))
-
 		servers := []*tcpproxy.TCPServer{}
 		for _, pb := range ingressCfg.PassthroughBackends {
 			svc := pb.Service
@@ -752,6 +750,10 @@ func (n *NGINXController) OnUpdate(ingressCfg ingress.Configuration) error {
 	o, err := n.command.ExecCommand("-s", "reload").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v\n%v", err, string(o))
+	}
+
+	if n.cfg.EnableSSLPassthrough {
+		n.Proxy.SetTimeouts(cfg.ProxyProtocolHeaderTimeout, parseStreamTimeout(cfg.ProxyStreamTimeout))
 	}
 
 	// Reload status checking runs in a separate goroutine to avoid blocking the sync queue
