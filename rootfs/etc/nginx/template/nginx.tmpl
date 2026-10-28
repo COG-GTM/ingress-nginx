@@ -1035,8 +1035,10 @@ stream {
             {{ else }}
             proxy_buffering                         {{ $location.Proxy.ProxyBuffering }};
             {{ end }}
+            {{ if isValidByteSize $location.Proxy.BufferSize false }}
             proxy_buffer_size                       {{ $location.Proxy.BufferSize }};
             proxy_buffers                           {{ $location.Proxy.BuffersNumber }} {{ $location.Proxy.BufferSize }};
+            {{ end }}
             proxy_request_buffering                 {{ $location.Proxy.RequestBuffering }};
 
             proxy_ssl_server_name       on;
@@ -1300,8 +1302,10 @@ stream {
             proxy_read_timeout                      {{ $location.Proxy.ReadTimeout }}s;
 
             proxy_buffering                         {{ $location.Proxy.ProxyBuffering }};
+            {{ if isValidByteSize $location.Proxy.BufferSize false }}
             proxy_buffer_size                       {{ $location.Proxy.BufferSize }};
             proxy_buffers                           {{ $location.Proxy.BuffersNumber }} {{ $location.Proxy.BufferSize }};
+            {{ end }}
             {{ if isValidByteSize $location.Proxy.ProxyMaxTempFileSize true }}
             proxy_max_temp_file_size                {{ $location.Proxy.ProxyMaxTempFileSize }};
             {{ end }}

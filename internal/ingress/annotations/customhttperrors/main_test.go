@@ -91,3 +91,33 @@ func TestParseAnnotations(t *testing.T) {
 		t.Errorf("expected %v but got %v", expected, val)
 	}
 }
+
+func TestParseAnnotationsWithSpaces(t *testing.T) {
+	ing := buildIngress()
+
+	data := map[string]string{}
+	data[parser.GetAnnotationWithPrefix("custom-http-errors")] = "404, 503"
+	ing.SetAnnotations(data)
+
+	i, err := NewParser(&resolver.Mock{}).Parse(ing)
+	if err != nil {
+		t.Fatalf("unexpected error parsing ingress with custom-http-errors: %v", err)
+	}
+
+	expected := []int{404, 503}
+	if !reflect.DeepEqual(expected, i) {
+		t.Errorf("expected %v but got %v", expected, i)
+	}
+}
+
+func TestParseAnnotationsRejectsCommaAsDigit(t *testing.T) {
+	ing := buildIngress()
+
+	data := map[string]string{}
+	data[parser.GetAnnotationWithPrefix("custom-http-errors")] = ",00"
+	ing.SetAnnotations(data)
+
+	if _, err := NewParser(&resolver.Mock{}).Parse(ing); err == nil {
+		t.Errorf("expected error parsing ingress with custom-http-errors ',00'")
+	}
+}

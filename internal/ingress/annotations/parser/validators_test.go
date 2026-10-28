@@ -18,6 +18,7 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	networking "k8s.io/api/networking/v1"
@@ -364,6 +365,59 @@ func TestCommonNameAnnotationValidator(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := CommonNameAnnotationValidator(tt.annotation); (err != nil) != tt.wantErr {
 				t.Errorf("CommonNameAnnotationValidator() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateRegexValidatesUsedValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		regex   *regexp.Regexp
+		value   string
+		wantErr bool
+	}{
+		{"surrounding spaces are trimmed", URLIsValidRegex, "  /a/b  ", false},
+		{"interior space is not removed", URLIsValidRegex, "/a /b", true},
+		{"interior spaces are not removed", BasicCharsRegex, "a b c", true},
+		{"spaces allowed by the regex are accepted", CharsWithSpace, "a b", false},
+		{"size with b suffix", SizeRegex, "8b", true},
+		{"size with g suffix", SizeRegex, "1g", true},
+		{"size with spaces", SizeRegex, "8 k", true},
+		{"size with k suffix", SizeRegex, "8k", false},
+		{"size with M suffix", SizeRegex, "8M", false},
+		{"offset with g suffix", OffsetRegex, "1g", false},
+		{"offset with b suffix", OffsetRegex, "1b", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateRegex(tt.regex, true)(tt.value); (err != nil) != tt.wantErr {
+				t.Errorf("ValidateRegex(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateOffOrPair(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"off", "off", false},
+		{"two arguments", "/one/ /", false},
+		{"two arguments with extra spaces", "  /one/   /  ", false},
+		{"single argument", "/a/b", true},
+		{"three arguments", "/a /b /c", true},
+		{"tab separated", "/a\t/b", true},
+		{"newline separated", "/a\n/b", true},
+		{"invalid characters", "/a /b;", true},
+		{"empty", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateOffOrPair(URLIsValidRegex)(tt.value); (err != nil) != tt.wantErr {
+				t.Errorf("ValidateOffOrPair(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
 			}
 		})
 	}

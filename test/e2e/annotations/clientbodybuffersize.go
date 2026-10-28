@@ -144,7 +144,7 @@ var _ = framework.DescribeAnnotation("client-body-buffer-size", func() {
 			Status(http.StatusOK)
 	})
 
-	ginkgo.It("should not set client_body_buffer_size to invalid 1b", func() {
+	ginkgo.It("should reject the ingress with invalid client_body_buffer_size 1b", func() {
 		host := clientBodyBufferSizeHost
 
 		clientBodyBufferSize := "1b"
@@ -163,6 +163,6 @@ var _ = framework.DescribeAnnotation("client-body-buffer-size", func() {
 			GET("/").
 			WithHeader("Host", host).
 			Expect().
-			Status(http.StatusOK)
+			Status(http.StatusNotFound)
 	})
 })

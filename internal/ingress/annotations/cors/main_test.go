@@ -235,3 +235,27 @@ func TestIngressCorsConfigAllowOriginWithNonHttpProtocol(t *testing.T) {
 		t.Errorf("expected %v but returned %v", expectedCorsAllowOrigins, nginxCors.CorsAllowOrigin)
 	}
 }
+
+func TestIngressCorsConfigAllowOriginWithSpaces(t *testing.T) {
+	ing := buildIngress()
+
+	data := map[string]string{}
+	data[parser.GetAnnotationWithPrefix(corsEnableAnnotation)] = enableAnnotation
+	data[parser.GetAnnotationWithPrefix(corsAllowOriginAnnotation)] = "https://origin123.test.com:4443, https://origin321.test.com:4443"
+	ing.SetAnnotations(data)
+
+	corst, err := NewParser(&resolver.Mock{}).Parse(ing)
+	if err != nil {
+		t.Fatalf("error parsing annotations: %v", err)
+	}
+
+	nginxCors, ok := corst.(*Config)
+	if !ok {
+		t.Fatalf("expected a Config type but returned %t", corst)
+	}
+
+	expectedCorsAllowOrigins := []string{"https://origin123.test.com:4443", "https://origin321.test.com:4443"}
+	if !reflect.DeepEqual(nginxCors.CorsAllowOrigin, expectedCorsAllowOrigins) {
+		t.Errorf("expected %v but returned %v", expectedCorsAllowOrigins, nginxCors.CorsAllowOrigin)
+	}
+}

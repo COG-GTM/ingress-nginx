@@ -65,7 +65,7 @@ var CanaryAnnotations = parser.Annotation{
 			For any other value, the header will be ignored and the request compared against the other canary rules by precedence`,
 		},
 		canaryByHeaderValueAnnotation: {
-			Validator: parser.ValidateRegex(parser.BasicCharsRegex, true),
+			Validator: parser.ValidateRegex(parser.CharsWithSpace, true),
 			Scope:     parser.AnnotationScopeIngress,
 			Risk:      parser.AnnotationRiskMedium,
 			Documentation: `This annotation defines the header value to match for notifying the Ingress to route the request to the service specified in the Canary Ingress. 

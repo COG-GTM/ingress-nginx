@@ -32,7 +32,7 @@ const (
 )
 
 // We accept anything between 400 and 599, on a comma separated.
-var arrayOfHTTPErrors = regexp.MustCompile(`^(?:[4,5]\d{2},?)*$`)
+var arrayOfHTTPErrors = regexp.MustCompile(`^(?: *[45]\d{2} *,?)*$`)
 
 var customHTTPErrorsAnnotations = parser.Annotation{
 	Group: "backend",
@@ -72,7 +72,7 @@ func (e customhttperrors) Parse(ing *networking.Ingress) (interface{}, error) {
 	cSplit := strings.Split(c, ",")
 	codes := make([]int, 0, len(cSplit))
 	for _, i := range cSplit {
-		num, err := strconv.Atoi(i)
+		num, err := strconv.Atoi(strings.TrimSpace(i))
 		if err != nil {
 			return nil, err
 		}
