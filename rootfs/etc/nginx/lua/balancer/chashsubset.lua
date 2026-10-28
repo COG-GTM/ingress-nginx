@@ -100,11 +100,15 @@ function _M.sync(self, backend)
     return
   end
 
+  -- build the new ring before touching any state so a failure keeps the
+  -- previous, consistent ring/subsets pair
+  local subsets
+  subset_map, subsets = build_subset_map(backend)
+  local instance = resty_chash:new(subset_map)
+
+  self.instance = instance
+  self.subsets = subsets
   self.current_endpoints = backend.endpoints
-
-  subset_map, self.subsets = build_subset_map(backend)
-
-  self.instance:reinit(subset_map)
 
   return
 end
