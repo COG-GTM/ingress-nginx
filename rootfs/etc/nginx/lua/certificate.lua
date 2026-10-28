@@ -4,16 +4,27 @@ local ocsp = require("ngx.ocsp")
 local ngx = ngx
 local string = string
 local tostring = tostring
+local type = type
 local re_sub = ngx.re.sub
-local unpack = unpack
+local ipairs = ipairs
 
 local dns_lookup = require("util.dns").lookup
+local ip_util = require("util.ip")
 
 local _M = {
   is_ocsp_stapling_enabled = false
 }
 
 local DEFAULT_CERT_HOSTNAME = "_"
+
+local OCSP_RESPONDER_SCHEMES = { http = true, https = true }
+-- a failed OCSP fetch for a certificate is retried only after this many seconds
+local OCSP_FETCH_RETRY_INTERVAL = 300
+local OCSP_FETCH_LOCK_PREFIX = "fetch_lock:"
+
+-- non-public networks OCSP responders may be reached on, see
+-- set_ocsp_responder_allowed_cidrs
+local ocsp_responder_allowed_cidrs = nil
 
 local certificate_data = ngx.shared.certificate_data
 local certificate_servers = ngx.shared.certificate_servers
@@ -78,9 +89,50 @@ local function is_ocsp_stapling_enabled_for(_)
   return _M.is_ocsp_stapling_enabled
 end
 
-local function get_resolved_url(parsed_url)
-  local scheme, host, port, path = unpack(parsed_url)
-  local ip = dns_lookup(host)[1]
+-- The responder URL comes from the (tenant supplied) certificate, so only
+-- connect to it when it resolves exclusively to public unicast addresses or
+-- explicitly allowed networks. Otherwise the controller could be used to send
+-- requests to internal services.
+local function resolve_ocsp_responder(parsed_url)
+  local scheme, host = parsed_url[1], parsed_url[2]
+  if not OCSP_RESPONDER_SCHEMES[scheme] then
+    return nil, "unsupported scheme " .. tostring(scheme)
+  end
+  if not host or host == "" then
+    return nil, "missing host"
+  end
+
+  local bare_host = host:match("^%[(.+)%]$") or host
+
+  local addresses
+  if ip_util.is_ip(bare_host) then
+    addresses = { bare_host }
+  else
+    addresses = dns_lookup(bare_host)
+  end
+
+  if not addresses or #addresses == 0 then
+    return nil, "could not resolve " .. bare_host
+  end
+
+  for _, address in ipairs(addresses) do
+    if not ip_util.is_ip(address) then
+      return nil, "could not resolve " .. bare_host
+    end
+    if not ip_util.is_public(address) and
+        not ip_util.in_cidrs(address, ocsp_responder_allowed_cidrs) then
+      return nil, "responder resolves to non-public address " .. address
+    end
+  end
+
+  return addresses[1], nil
+end
+
+local function get_resolved_url(parsed_url, ip)
+  local scheme, port, path = parsed_url[1], parsed_url[3], parsed_url[4]
+  if ip:find(":", 1, true) then
+    ip = "[" .. ip .. "]"
+  end
   return string.format("%s://%s:%s%s", scheme, ip, port, path)
 end
 
@@ -93,7 +145,13 @@ local function do_ocsp_request(url, ocsp_request)
     return nil, err
   end
 
-  local resolved_url = get_resolved_url(parsed_url)
+  local ip
+  ip, err = resolve_ocsp_responder(parsed_url)
+  if not ip then
+    return nil, "refused OCSP responder URL " .. url .. ": " .. err
+  end
+
+  local resolved_url = get_resolved_url(parsed_url, ip)
 
   local http_response
   http_response, err = httpc:request_uri(resolved_url, {
@@ -115,10 +173,13 @@ local function do_ocsp_request(url, ocsp_request)
   return http_response.body, nil
 end
 
--- TODO: ideally this function should have a lock around to ensure
--- only one instance runs at a time. Otherwise it is theoretically possible
--- that this function gets called from multiple Nginx workers at the same time.
--- While this has no functional implications, it generates extra load on OCSP servers.
+local function ocsp_fetch_lock_key(uid)
+  return OCSP_FETCH_LOCK_PREFIX .. uid
+end
+
+-- Callers must hold the fetch lock (see schedule_ocsp_fetch). The lock is only
+-- released after a successful fetch, so a failing responder is retried at most
+-- once per OCSP_FETCH_RETRY_INTERVAL (negative caching).
 local function fetch_and_cache_ocsp_response(uid, der_cert)
   local url, err = ocsp.get_ocsp_responder_from_der_chain(der_cert)
   if not url and err then
@@ -169,10 +230,6 @@ local function fetch_and_cache_ocsp_response(uid, der_cert)
     -- on its own.
     --
 
-    -- Also we should do negative caching here to avoid sending too many request to
-    -- the OCSP responder. Imagine OCSP responder is having an intermittent issue
-    -- and we keep sending request. It might make things worse for the responder.
-
     ngx.log(ngx.NOTICE, "OCSP response validation failed: ", err)
     return
   end
@@ -189,11 +246,35 @@ local function fetch_and_cache_ocsp_response(uid, der_cert)
     ngx.log(ngx.NOTICE, "removed an existing item when saving OCSP response, ",
       "consider increasing shared dictionary size for 'ocsp_response_cache'")
   end
+
+  if success then
+    ocsp_response_cache:delete(ocsp_fetch_lock_key(uid))
+  end
+end
+
+-- schedule_ocsp_fetch enqueues at most one fetch per certificate across all
+-- workers and OCSP_FETCH_RETRY_INTERVAL.
+local function schedule_ocsp_fetch(uid, der_cert)
+  local lock_key = ocsp_fetch_lock_key(uid)
+  local ok, err = ocsp_response_cache:add(lock_key, true, OCSP_FETCH_RETRY_INTERVAL)
+  if not ok then
+    if err ~= "exists" then
+      ngx.log(ngx.ERR, "failed to acquire OCSP fetch lock: ", err)
+    end
+    return
+  end
+
+  ok, err = ngx.timer.at(0, function() fetch_and_cache_ocsp_response(uid, der_cert) end)
+  if not ok then
+    ocsp_response_cache:delete(lock_key)
+    ngx.log(ngx.ERR, "failed to schedule OCSP fetch: ", err)
+  end
 end
 
 -- ocsp_staple looks at the cache and staples response from cache if it exists
 -- if there is no cached response or the existing response is stale,
--- it enqueues fetch_and_cache_ocsp_response function to refetch the response.
+-- it enqueues fetch_and_cache_ocsp_response function to refetch the response
+-- (unless a fetch is already in flight or recently failed).
 -- This design tradeoffs lack of OCSP response in the first request with better latency.
 --
 -- Serving stale response ensures that we don't serve another request without OCSP response
@@ -202,7 +283,7 @@ end
 local function ocsp_staple(uid, der_cert)
   local response, _, is_stale = ocsp_response_cache:get_stale(uid)
   if not response or is_stale then
-    ngx.timer.at(0, function() fetch_and_cache_ocsp_response(uid, der_cert) end)
+    schedule_ocsp_fetch(uid, der_cert)
     return false, nil
   end
 
@@ -212,6 +293,30 @@ local function ocsp_staple(uid, der_cert)
   end
 
   return true, nil
+end
+
+-- allows OCSP requests to responders on the given non-public networks
+-- (e.g. an in-cluster responder of a trusted internal CA)
+function _M.set_ocsp_responder_allowed_cidrs(cidrs)
+  if type(cidrs) ~= "table" then
+    ocsp_responder_allowed_cidrs = nil
+    return nil
+  end
+
+  local parsed, err = ip_util.parse_cidrs(cidrs)
+  if not parsed then
+    return err
+  end
+
+  ocsp_responder_allowed_cidrs = parsed
+  return nil
+end
+
+-- drops the cached OCSP response and any fetch backoff for a certificate,
+-- e.g. when the certificate has been renewed
+function _M.invalidate_ocsp_response(uid)
+  ocsp_response_cache:delete(uid)
+  ocsp_response_cache:delete(ocsp_fetch_lock_key(uid))
 end
 
 function _M.configured_for_current_request()

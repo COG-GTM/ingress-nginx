@@ -77,6 +77,7 @@ func TestMergeConfigMapToStruct(t *testing.T) {
 		"disable-ipv6-dns":              "true",
 		"default-type":                  "text/plain",
 		"debug-connections":             "127.0.0.1,1.1.1.1/24,::1",
+		"ocsp-responder-allowed-cidrs":  "10.96.0.0/12, 10.0.0.5,not-a-cidr,fd00::/8",
 	}
 	def := config.NewDefault()
 	def.CustomHTTPErrors = []int{300, 400}
@@ -93,6 +94,7 @@ func TestMergeConfigMapToStruct(t *testing.T) {
 	def.GzipMinLength = 1024
 	def.GzipTypes = "text/html"
 	def.ProxyRealIPCIDR = []string{"1.1.1.1/8", "2.2.2.2/24"}
+	def.OCSPResponderAllowedCIDRs = []string{"10.96.0.0/12", "10.0.0.5", "fd00::/8"}
 	def.BindAddressIpv4 = []string{"1.1.1.1", "2.2.2.2"}
 	def.BindAddressIpv6 = []string{"[2001:db8:a0b:12f0::1]", "[3731:54:65fe:2::a7]"}
 	def.WorkerShutdownTimeout = "99s"

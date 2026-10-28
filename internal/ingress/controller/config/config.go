@@ -163,6 +163,13 @@ type Configuration struct {
 	// By default this is disabled
 	EnableOCSP bool `json:"enable-ocsp"`
 
+	// OCSPResponderAllowedCIDRs lists non-public networks (IPs or CIDRs) that
+	// OCSP responder URLs taken from certificates may resolve to. Responders on
+	// private, loopback, link-local and other non-public addresses are refused
+	// unless listed here.
+	// By default this is empty
+	OCSPResponderAllowedCIDRs []string `json:"ocsp-responder-allowed-cidrs"`
+
 	// EnableOWASPCoreRules enables the OWASP ModSecurity Core Rule Set (CRS)
 	// By default this is disabled
 	EnableOWASPCoreRules bool `json:"enable-owasp-modsecurity-crs"`
