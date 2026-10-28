@@ -377,6 +377,8 @@ func TestProxySetHeaders(t *testing.T) {
 		{"header with other bad symbols", "http://goog.url", map[string]string{"header": "bad+value"}, false},
 		{"header with nginx variable", "http://goog.url", map[string]string{"X-Forwarded-For": "$remote_addr"}, false},
 		{"header with empty value", "http://goog.url", map[string]string{"X-Remove-Me": ""}, false},
+		{"header with non-ASCII value", "http://goog.url", map[string]string{"X-Display-Name": "José Müller 東京"}, false},
+		{"value with tab", "http://goog.url", map[string]string{"X-Foo": "a\tb"}, true},
 		{"value breaking out of quotes", "http://goog.url", map[string]string{"X-Foo": "a'; access_by_lua_block { os.execute(\"id\") } proxy_set_header 'b' 'c"}, true},
 		{"value with single quote", "http://goog.url", map[string]string{"X-Foo": "a'"}, true},
 		{"value with double quote", "http://goog.url", map[string]string{"X-Foo": "a\""}, true},

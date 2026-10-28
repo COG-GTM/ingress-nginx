@@ -570,9 +570,11 @@ func TestBuildAuthProxySetHeadersEscapesQuotes(t *testing.T) {
 	proxySetHeaders := map[string]string{
 		"X-Foo": `a'; access_by_lua_block { os.execute("id") } proxy_set_header 'b' 'c`,
 		"X-Bar": "back\\slash\nnewline",
+		"X-Baz": "José",
 	}
 	expected := []string{
 		`proxy_set_header 'X-Bar' 'back\\slashnewline';`,
+		`proxy_set_header 'X-Baz' 'José';`,
 		`proxy_set_header 'X-Foo' 'a\'; access_by_lua_block { os.execute("id") } proxy_set_header \'b\' \'c';`,
 	}
 
