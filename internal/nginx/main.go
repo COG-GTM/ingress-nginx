@@ -69,7 +69,7 @@ var LuaConfigPath = "/etc/nginx/lua/cfg.json"
 
 // ConfigurationTokenHeader is the header that must carry the configuration token
 // on every request to the /configuration endpoint of the status server.
-const ConfigurationTokenHeader = "X-Ingress-Nginx-Configuration-Token"
+const ConfigurationTokenHeader = "X-Ingress-Nginx-Configuration-Token" //nolint:gosec // header name, not a credential
 
 var (
 	configurationTokenMu sync.Mutex

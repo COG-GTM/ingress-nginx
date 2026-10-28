@@ -35,9 +35,9 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 		f.NewEchoDeployment()
 	})
 
-	ginkgo.It("should set mirror-target to http://mirror.example.com/mirror", func() {
+	ginkgo.It("should set mirror-target to http://192.0.2.1/mirror", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target": "http://mirror.example.com/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target": "http://192.0.2.1/mirror",
 		}
 
 		ing := framework.NewSingleIngress(host, "/", host, f.Namespace, framework.EchoService, 80, annotations)
@@ -68,7 +68,7 @@ var _ = framework.DescribeAnnotation("mirror-*", func() {
 
 	ginkgo.It("should disable mirror-request-body", func() {
 		annotations := map[string]string{
-			"nginx.ingress.kubernetes.io/mirror-target":       "http://mirror.example.com/mirror",
+			"nginx.ingress.kubernetes.io/mirror-target":       "http://192.0.2.1/mirror",
 			"nginx.ingress.kubernetes.io/mirror-request-body": "off",
 		}
 
