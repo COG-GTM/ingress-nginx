@@ -94,7 +94,8 @@ func assertClosed(t *testing.T, conn net.Conn) {
 }
 
 func TestHandleClosesSilentConnection(t *testing.T) {
-	p := &TCPProxy{Default: backendServer(t), HandshakeTimeout: 200 * time.Millisecond}
+	p := &TCPProxy{Default: backendServer(t)}
+	p.SetTimeouts(200*time.Millisecond, 0)
 	addr, done := startProxy(t, p)
 
 	client, err := net.Dial("tcp", addr)
@@ -112,11 +113,8 @@ func TestHandleClosesSilentConnection(t *testing.T) {
 }
 
 func TestHandleClosesIdleProxiedConnection(t *testing.T) {
-	p := &TCPProxy{
-		Default:          backendServer(t),
-		HandshakeTimeout: time.Second,
-		IdleTimeout:      300 * time.Millisecond,
-	}
+	p := &TCPProxy{Default: backendServer(t)}
+	p.SetTimeouts(time.Second, 300*time.Millisecond)
 	addr, done := startProxy(t, p)
 
 	client, err := net.Dial("tcp", addr)
@@ -156,11 +154,8 @@ func TestHandleKeepsConnectionWithOneWayTraffic(t *testing.T) {
 		}
 	}()
 
-	p := &TCPProxy{
-		Default:          &TCPServer{Hostname: "backend", IP: "127.0.0.1", Port: backendAddr.Port},
-		HandshakeTimeout: time.Second,
-		IdleTimeout:      300 * time.Millisecond,
-	}
+	p := &TCPProxy{Default: &TCPServer{Hostname: "backend", IP: "127.0.0.1", Port: backendAddr.Port}}
+	p.SetTimeouts(time.Second, 300*time.Millisecond)
 	addr, done := startProxy(t, p)
 
 	client, err := net.Dial("tcp", addr)
@@ -183,6 +178,21 @@ func TestHandleKeepsConnectionWithOneWayTraffic(t *testing.T) {
 		t.Fatalf("expected %d bytes while the server kept sending, got %d", chunks, len(received))
 	}
 	waitDone(t, done, 2*time.Second, "Handle did not return after the backend closed")
+}
+
+func TestSetTimeoutsDefaults(t *testing.T) {
+	p := &TCPProxy{}
+	if p.getHandshakeTimeout() != DefaultHandshakeTimeout || p.getIdleTimeout() != DefaultIdleTimeout {
+		t.Fatalf("unexpected defaults %v/%v", p.getHandshakeTimeout(), p.getIdleTimeout())
+	}
+	p.SetTimeouts(time.Second, time.Minute)
+	if p.getHandshakeTimeout() != time.Second || p.getIdleTimeout() != time.Minute {
+		t.Fatalf("unexpected timeouts %v/%v", p.getHandshakeTimeout(), p.getIdleTimeout())
+	}
+	p.SetTimeouts(0, -time.Second)
+	if p.getHandshakeTimeout() != DefaultHandshakeTimeout || p.getIdleTimeout() != DefaultIdleTimeout {
+		t.Fatalf("non-positive values should select defaults, got %v/%v", p.getHandshakeTimeout(), p.getIdleTimeout())
+	}
 }
 
 // deadlineIgnoringConn mimics wrappers (like the PROXY protocol listener)

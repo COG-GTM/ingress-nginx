@@ -23,12 +23,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -456,6 +458,8 @@ func (n *NGINXController) DefaultEndpoint() ingress.Endpoint {
 //nolint:gocritic // the cfg shouldn't be changed, and shouldn't be mutated by other processes while being rendered.
 func (n *NGINXController) generateTemplate(cfg ngx_config.Configuration, ingressCfg ingress.Configuration) ([]byte, error) {
 	if n.cfg.EnableSSLPassthrough {
+		n.Proxy.SetTimeouts(cfg.ProxyProtocolHeaderTimeout, parseStreamTimeout(cfg.ProxyStreamTimeout))
+
 		servers := []*tcpproxy.TCPServer{}
 		for _, pb := range ingressCfg.PassthroughBackends {
 			svc := pb.Service
@@ -823,9 +827,8 @@ func (n *NGINXController) setupSSLProxy() {
 			Port:          proxyPort,
 			ProxyProtocol: true,
 		},
-		HandshakeTimeout: cfg.ProxyProtocolHeaderTimeout,
-		IdleTimeout:      parseStreamTimeout(cfg.ProxyStreamTimeout),
 	}
+	n.Proxy.SetTimeouts(cfg.ProxyProtocolHeaderTimeout, parseStreamTimeout(cfg.ProxyStreamTimeout))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%v", sslPort))
 	if err != nil {
@@ -859,14 +862,53 @@ func (n *NGINXController) setupSSLProxy() {
 	}()
 }
 
-// parseStreamTimeout converts an NGINX time value such as "600s" or "600"
-// into a time.Duration. Invalid values fall back to tcpproxy.DefaultIdleTimeout.
-func parseStreamTimeout(value string) time.Duration {
-	value = strings.TrimSpace(value)
-	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
+var nginxTimeUnits = map[string]time.Duration{
+	"ms": time.Millisecond,
+	"s":  time.Second,
+	"m":  time.Minute,
+	"h":  time.Hour,
+	"d":  24 * time.Hour,
+	"w":  7 * 24 * time.Hour,
+	"M":  30 * 24 * time.Hour,
+	"y":  365 * 24 * time.Hour,
+}
+
+var (
+	nginxTimeRegex     = regexp.MustCompile(`^(?:\d+(?:ms|[smhdwMy]))*\d*$`)
+	nginxTimePartRegex = regexp.MustCompile(`(\d+)(ms|[smhdwMy])?`)
+)
+
+// parseNginxTime converts an NGINX time value such as "600", "600s" or
+// "1h 30m" into a time.Duration, see https://nginx.org/en/docs/syntax.html.
+func parseNginxTime(value string) (time.Duration, error) {
+	compact := strings.Join(strings.Fields(value), "")
+	if compact == "" || !nginxTimeRegex.MatchString(compact) {
+		return 0, fmt.Errorf("invalid time value %q", value)
 	}
-	if d, err := time.ParseDuration(value); err == nil && d > 0 {
+
+	var total time.Duration
+	for _, match := range nginxTimePartRegex.FindAllStringSubmatch(compact, -1) {
+		amount, err := strconv.ParseInt(match[1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid time value %q: %w", value, err)
+		}
+		unit := time.Second
+		if match[2] != "" {
+			unit = nginxTimeUnits[match[2]]
+		}
+		if amount > int64(math.MaxInt64/unit) || total > math.MaxInt64-time.Duration(amount)*unit {
+			return 0, fmt.Errorf("time value %q is too large", value)
+		}
+		total += time.Duration(amount) * unit
+	}
+	return total, nil
+}
+
+// parseStreamTimeout converts proxy-stream-timeout into the idle timeout of
+// the SSL passthrough proxy. Invalid values fall back to tcpproxy.DefaultIdleTimeout.
+func parseStreamTimeout(value string) time.Duration {
+	d, err := parseNginxTime(value)
+	if err == nil && d > 0 {
 		return d
 	}
 	klog.Warningf("Invalid proxy-stream-timeout %q for SSL passthrough, using %v", value, tcpproxy.DefaultIdleTimeout)

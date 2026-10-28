@@ -49,24 +49,31 @@ type TCPProxy struct {
 	ServerList []*TCPServer
 	Default    *TCPServer
 
-	// HandshakeTimeout bounds how long a client may take to send the
-	// initial TLS ClientHello.
-	HandshakeTimeout time.Duration
-	// IdleTimeout closes a proxied connection when no data is transferred
+	// handshakeTimeout bounds how long a client may take to send the
+	// initial TLS ClientHello and how long dialing the backend may take.
+	handshakeTimeout atomic.Int64
+	// idleTimeout closes a proxied connection when no data is transferred
 	// in either direction for this long.
-	IdleTimeout time.Duration
+	idleTimeout atomic.Int64
 }
 
-func (p *TCPProxy) handshakeTimeout() time.Duration {
-	if p.HandshakeTimeout > 0 {
-		return p.HandshakeTimeout
+// SetTimeouts updates the handshake and idle timeouts used by new
+// connections. Non-positive values select the defaults.
+func (p *TCPProxy) SetTimeouts(handshake, idle time.Duration) {
+	p.handshakeTimeout.Store(int64(handshake))
+	p.idleTimeout.Store(int64(idle))
+}
+
+func (p *TCPProxy) getHandshakeTimeout() time.Duration {
+	if d := time.Duration(p.handshakeTimeout.Load()); d > 0 {
+		return d
 	}
 	return DefaultHandshakeTimeout
 }
 
-func (p *TCPProxy) idleTimeout() time.Duration {
-	if p.IdleTimeout > 0 {
-		return p.IdleTimeout
+func (p *TCPProxy) getIdleTimeout() time.Duration {
+	if d := time.Duration(p.idleTimeout.Load()); d > 0 {
+		return d
 	}
 	return DefaultIdleTimeout
 }
@@ -93,7 +100,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 	// See: https://www.ibm.com/docs/en/ztpf/1.1.0.15?topic=sessions-ssl-record-format
 	data := make([]byte, 16384)
 
-	length, err := readWithTimeout(conn, data, p.handshakeTimeout())
+	length, err := readWithTimeout(conn, data, p.getHandshakeTimeout())
 	if err != nil {
 		klog.V(4).ErrorS(err, "Error reading data from the connection")
 		return
@@ -113,7 +120,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 
 	hostPort := net.JoinHostPort(proxy.IP, fmt.Sprintf("%v", proxy.Port))
 	klog.V(4).InfoS("passing to", "hostport", hostPort)
-	clientConn, err := net.Dial("tcp", hostPort)
+	clientConn, err := net.DialTimeout("tcp", hostPort, p.getHandshakeTimeout())
 	if err != nil {
 		klog.V(4).ErrorS(err, "error dialing proxy", "ip", proxy.IP, "port", proxy.Port, "hostname", proxy.Hostname)
 		return
@@ -151,7 +158,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 		}
 	}
 
-	pipe(clientConn, conn, p.idleTimeout())
+	pipe(clientConn, conn, p.getIdleTimeout())
 }
 
 // readWithTimeout performs a single Read bounded by timeout. Besides the read

@@ -689,7 +689,7 @@ Enables or disables the [PROXY protocol](https://www.nginx.com/resources/admin-g
 
 ## proxy-protocol-header-timeout
 
-Sets the timeout value for receiving the proxy-protocol headers. The default of 5 seconds prevents the TLS passthrough handler from waiting indefinitely on a dropped connection. When SSL passthrough is enabled, the same timeout also limits how long a client may take to send its TLS ClientHello.
+Sets the timeout value for receiving the proxy-protocol headers. The default of 5 seconds prevents the TLS passthrough handler from waiting indefinitely on a dropped connection. When SSL passthrough is enabled, the same timeout also limits how long a client may take to send its TLS ClientHello and how long the controller waits to connect to the passthrough backend.
 _**default:**_ 5s
 
 ## enable-aio-write
