@@ -54,7 +54,9 @@ func realClientHello(t testing.TB, serverName string) []byte {
 	if _, err := io.ReadFull(server, body); err != nil {
 		t.Fatalf("reading record body: %v", err)
 	}
-	return append(header, body...)
+	record := make([]byte, 0, len(header)+len(body))
+	record = append(record, header...)
+	return append(record, body...)
 }
 
 func u16(n int) []byte {
@@ -70,9 +72,11 @@ func u24(n int) []byte {
 func buildClientHello(extensions []byte) []byte {
 	hello := []byte{0x03, 0x03}
 	hello = append(hello, make([]byte, clientHelloRandomLength)...)
-	hello = append(hello, 0x00)                   // empty session id
-	hello = append(hello, 0x00, 0x02, 0x13, 0x01) // one cipher suite
-	hello = append(hello, 0x01, 0x00)             // null compression
+	hello = append(hello,
+		0x00,                   // empty session id
+		0x00, 0x02, 0x13, 0x01, // one cipher suite
+		0x01, 0x00, // null compression
+	)
 	if extensions != nil {
 		hello = append(hello, u16(len(extensions))...)
 		hello = append(hello, extensions...)

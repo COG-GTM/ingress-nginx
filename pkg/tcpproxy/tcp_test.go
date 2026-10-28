@@ -168,7 +168,7 @@ func (panicConn) Read([]byte) (int, error) {
 	panic("boom")
 }
 
-func TestHandleRecoversFromPanic(t *testing.T) {
+func TestHandleRecoversFromPanic(_ *testing.T) {
 	_, server := net.Pipe()
 	p := &TCPProxy{}
 	p.Handle(panicConn{Conn: server})
