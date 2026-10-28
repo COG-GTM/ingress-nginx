@@ -508,6 +508,10 @@ func (n *NGINXController) getStreamServices(configmapName string, proto apiv1.Pr
 			klog.Warningf("Error getting Service %q: %v", nsName, err)
 			continue
 		}
+		if svc.Spec.Type == apiv1.ServiceTypeExternalName && n.cfg.DisableServiceExternalName {
+			klog.Warningf("Service %q of type ExternalName not allowed due to Ingress configuration.", nsName)
+			continue
+		}
 		var endps []ingress.Endpoint
 		/* #nosec */
 		targetPort, err := strconv.Atoi(svcPort) // #nosec

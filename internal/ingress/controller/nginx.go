@@ -1089,6 +1089,7 @@ func (n *NGINXController) createLuaConfig(cfg *ngx_config.Configuration) error {
 			HTTPSPort:    strconv.Itoa(n.cfg.ListenPorts.HTTPS),
 			StatusPort:   strconv.Itoa(nginx.StatusPort),
 			SSLProxyPort: strconv.Itoa(n.cfg.ListenPorts.SSLProxy),
+			DefaultPort:  strconv.Itoa(n.cfg.ListenPorts.Default),
 		},
 		UseProxyProtocol:        cfg.UseProxyProtocol,
 		UseForwardedHeaders:     cfg.UseForwardedHeaders,

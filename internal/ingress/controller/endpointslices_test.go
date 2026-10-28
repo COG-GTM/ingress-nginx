@@ -927,3 +927,60 @@ func TestGetEndpointsFromSlices(t *testing.T) {
 		})
 	}
 }
+
+func TestIsLocalExternalName(t *testing.T) {
+	local := []string{
+		"localhost",
+		"LOCALHOST.",
+		"foo.localhost",
+		"127.0.0.1",
+		"127.1.2.3",
+		"0.0.0.0",
+		"0.1.2.3",
+		"::1",
+		"::",
+		"::ffff:127.0.0.1",
+		"::ffff:7f00:1",
+		"::ffff:0.0.0.0",
+		"::127.0.0.1",
+	}
+	for _, name := range local {
+		if !isLocalExternalName(name) {
+			t.Errorf("expected %q to be rejected as a local ExternalName", name)
+		}
+	}
+
+	remote := []string{
+		"www.google.com",
+		"www.google.com.",
+		"notlocalhost",
+		"10.0.0.1",
+		"1.27.0.1",
+		"::ffff:10.0.0.1",
+		"2001:db8::1",
+		"fe80::1",
+	}
+	for _, name := range remote {
+		if isLocalExternalName(name) {
+			t.Errorf("expected %q to be allowed as an ExternalName", name)
+		}
+	}
+}
+
+func TestGetEndpointsFromSlicesRejectsLocalExternalNames(t *testing.T) {
+	for _, name := range []string{"0.0.0.0", "::", "::ffff:127.0.0.1", "localhost."} {
+		svc := &corev1.Service{
+			Spec: corev1.ServiceSpec{
+				Type:         corev1.ServiceTypeExternalName,
+				ExternalName: name,
+			},
+		}
+		port := &corev1.ServicePort{Name: "default", TargetPort: intstr.FromInt(10247)}
+		r := getEndpointsFromSlices(svc, port, corev1.ProtocolTCP, "", func(string) ([]*discoveryv1.EndpointSlice, error) {
+			return nil, nil
+		})
+		if len(r) != 0 {
+			t.Errorf("expected no endpoints for ExternalName %q, got %v", name, r)
+		}
+	}
+}

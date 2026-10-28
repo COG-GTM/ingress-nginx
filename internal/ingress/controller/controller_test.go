@@ -38,6 +38,7 @@ import (
 	networking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
@@ -126,6 +127,55 @@ func (fakeIngressStore) GetDefaultBackend() defaults.Backend {
 }
 
 func (fakeIngressStore) Run(_ chan struct{}) {}
+
+type streamServicesStore struct {
+	fakeIngressStore
+	configMap *corev1.ConfigMap
+	service   *corev1.Service
+}
+
+func (s *streamServicesStore) GetConfigMap(_ string) (*corev1.ConfigMap, error) {
+	return s.configMap, nil
+}
+
+func (s *streamServicesStore) GetService(_ string) (*corev1.Service, error) {
+	return s.service, nil
+}
+
+func TestGetStreamServicesExternalName(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		n := &NGINXController{
+			store: &streamServicesStore{
+				configMap: &corev1.ConfigMap{Data: map[string]string{"5432": "team-a/db-proxy:5432"}},
+				service: &corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{Name: "db-proxy", Namespace: "team-a"},
+					Spec: corev1.ServiceSpec{
+						Type:         corev1.ServiceTypeExternalName,
+						ExternalName: "db.example.com",
+						Ports: []corev1.ServicePort{{
+							Name:       "db",
+							Port:       5432,
+							TargetPort: intstr.FromInt(5432),
+							Protocol:   corev1.ProtocolTCP,
+						}},
+					},
+				},
+			},
+			cfg: &Configuration{
+				ListenPorts:                &ngx_config.ListenPorts{HTTP: 80, HTTPS: 443, Health: 10254, Default: 8181, SSLProxy: 442},
+				DisableServiceExternalName: disabled,
+			},
+		}
+
+		svcs := n.getStreamServices("ingress-nginx/tcp-services", corev1.ProtocolTCP)
+		if disabled && len(svcs) != 0 {
+			t.Errorf("expected ExternalName stream service to be skipped with DisableServiceExternalName, got %v", svcs)
+		}
+		if !disabled && len(svcs) != 1 {
+			t.Errorf("expected one ExternalName stream service, got %v", svcs)
+		}
+	}
+}
 
 type testNginxTestCommand struct {
 	t        *testing.T

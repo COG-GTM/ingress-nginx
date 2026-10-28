@@ -200,7 +200,7 @@ The json format should follow what's expected by lua:
 		use_proxy_protocol = %t,
 		is_ssl_passthrough_enabled = %t,
 		http_redirect_code = %v,
-		listen_ports = { ssl_proxy = "%v", https = "%v" },
+		listen_ports = { ssl_proxy = "%v", https = "%v", status_port = "%v", default_port = "%v" },
 
 		hsts = %t,
 		hsts_max_age = %v,
@@ -227,6 +227,7 @@ type LuaListenPorts struct {
 	HTTPSPort    string `json:"https"`
 	StatusPort   string `json:"status_port"`
 	SSLProxyPort string `json:"ssl_proxy"`
+	DefaultPort  string `json:"default_port"`
 }
 
 // Write populates a buffer using a template with NGINX configuration

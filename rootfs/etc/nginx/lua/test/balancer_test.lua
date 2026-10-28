@@ -150,6 +150,48 @@ describe("Balancer", function()
     end)
   end)
 
+  describe("balance()", function()
+    local ngx_balancer = require("ngx.balancer")
+
+    before_each(function()
+      stub(ngx_balancer, "set_current_peer", function() return true end)
+      stub(ngx_balancer, "set_more_tries")
+    end)
+
+    after_each(function()
+      ngx_balancer.set_current_peer:revert()
+      ngx_balancer.set_more_tries:revert()
+    end)
+
+    local function balance_to(peer)
+      mock_ngx({ ctx = { balancer = { name = "test", balance = function() return peer end } } })
+      balancer.balance()
+    end
+
+    it("refuses peers that loop back to this host", function()
+      for _, peer in ipairs({
+        "127.0.0.1:10246",
+        "127.0.0.1:10247",
+        "0.0.0.0:10246",
+        "[::1]:10246",
+        "[::]:10247",
+        "[::ffff:127.0.0.1]:10246",
+        "[::ffff:7f00:1]:10246",
+      }) do
+        balance_to(peer)
+      end
+      assert.stub(ngx_balancer.set_current_peer).was_not_called()
+    end)
+
+    it("allows the built-in default backend and remote peers", function()
+      balance_to("127.0.0.1:8181")
+      assert.stub(ngx_balancer.set_current_peer).was_called_with("127.0.0.1:8181")
+
+      balance_to("10.184.7.40:8080")
+      assert.stub(ngx_balancer.set_current_peer).was_called_with("10.184.7.40:8080")
+    end)
+  end)
+
   describe("route_to_alternative_balancer()", function()
     local backend, _primaryBalancer
 

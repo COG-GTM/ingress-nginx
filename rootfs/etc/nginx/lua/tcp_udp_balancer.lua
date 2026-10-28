@@ -2,6 +2,7 @@ local ngx_balancer = require("ngx.balancer")
 local cjson = require("cjson.safe")
 local util = require("util")
 local dns_lookup = require("util.dns").lookup
+local peer_util = require("util.peer")
 local configuration = require("tcp_udp_configuration")
 local round_robin = require("balancer.round_robin")
 
@@ -24,9 +25,6 @@ local DEFAULT_LB_ALG = "round_robin"
 local IMPLEMENTATIONS = {
   round_robin = round_robin
 }
-
-local PROHIBITED_LOCALHOST_PORT = configuration.prohibited_localhost_port or '10246'
-local PROHIBITED_PEER_PATTERN = "^127.*:" .. PROHIBITED_LOCALHOST_PORT .. "$"
 
 local _M = {}
 local balancers = {}
@@ -184,7 +182,9 @@ function _M.balance()
     return
   end
 
-  if peer:match(PROHIBITED_PEER_PATTERN) then
+  -- stream backends never legitimately point at this host; nginx's own
+  -- control sockets (status and stream configuration) listen on loopback
+  if peer_util.is_local(peer) then
     ngx.log(ngx.ERR, "attempted to proxy to self, balancer: ", balancer.name, ", peer: ", peer)
     return
   end
