@@ -35,7 +35,7 @@ var aliasAnnotation = parser.Annotation{
 	Group: "alias",
 	Annotations: parser.AnnotationFields{
 		serverAliasAnnotation: {
-			Validator: parser.ValidateArrayOfServerName,
+			Validator: parser.ValidateArrayOfServerAlias,
 			Scope:     parser.AnnotationScopeIngress,
 			Risk:      parser.AnnotationRiskHigh, // High as this allows regex chars
 			Documentation: `this annotation can be used to define additional server 
