@@ -11,17 +11,28 @@ local math = math
 local table = table
 local pairs = pairs
 
+local DEFAULT_SUBSET_SIZE = 3
+local MAX_SUBSET_SIZE = 1024
+
 local _M = { name = "chashsubset" }
 
 local function build_subset_map(backend)
   local endpoints = {}
   local subset_map = {}
   local subsets = {}
-  local subset_size = backend["upstreamHashByConfig"]["upstream-hash-by-subset-size"]
+  local subset_size = tonumber(backend["upstreamHashByConfig"]["upstream-hash-by-subset-size"])
 
   for _, endpoint in pairs(backend.endpoints) do
     table.insert(endpoints, endpoint)
   end
+
+  if not subset_size or subset_size < 1 then
+    subset_size = DEFAULT_SUBSET_SIZE
+  end
+  subset_size = math.floor(subset_size)
+  -- a subset larger than the endpoint set only repeats endpoints, so never
+  -- build more nodes than there are endpoints (bounded by MAX_SUBSET_SIZE)
+  subset_size = math.min(subset_size, math.max(#endpoints, 1), MAX_SUBSET_SIZE)
 
   local set_count = math.ceil(#endpoints/subset_size)
   local node_count = set_count * subset_size
@@ -89,11 +100,15 @@ function _M.sync(self, backend)
     return
   end
 
+  -- build the new ring before touching any state so a failure keeps the
+  -- previous, consistent ring/subsets pair
+  local subsets
+  subset_map, subsets = build_subset_map(backend)
+  local instance = resty_chash:new(subset_map)
+
+  self.instance = instance
+  self.subsets = subsets
   self.current_endpoints = backend.endpoints
-
-  subset_map, self.subsets = build_subset_map(backend)
-
-  self.instance:reinit(subset_map)
 
   return
 end

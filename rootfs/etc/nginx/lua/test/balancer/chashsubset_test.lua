@@ -87,6 +87,54 @@ describe("Balancer chash subset", function()
       end
     end)
 
+    it("caps an oversized subset size at the endpoint count", function()
+      local backend = get_test_backend(4)
+      backend["upstreamHashByConfig"]["upstream-hash-by-subset-size"] = 1000000000
+
+      local instance = balancer_chashsubset:new(backend)
+
+      local count = 0
+      for _, endpoints in pairs(instance["subsets"]) do
+        count = count + 1
+        assert.are.equal(4, #endpoints)
+      end
+      assert.are.equal(1, count)
+    end)
+
+    it("falls back to the default subset size for invalid values", function()
+      for _, size in ipairs({ 0, -5, "abc" }) do
+        local backend = get_test_backend(9)
+        backend["upstreamHashByConfig"]["upstream-hash-by-subset-size"] = size
+
+        local instance = balancer_chashsubset:new(backend)
+
+        local count = 0
+        for _, endpoints in pairs(instance["subsets"]) do
+          count = count + 1
+          assert.are.equal(3, #endpoints)
+        end
+        assert.are.equal(3, count)
+      end
+    end)
+
+    it("keeps the previous ring and subsets when a sync fails", function()
+      local backend = get_test_backend(6)
+      local instance = balancer_chashsubset:new(backend)
+      local old_ring, old_subsets, old_endpoints =
+        instance.instance, instance.subsets, instance.current_endpoints
+
+      local resty_chash = require("resty.chash")
+      local original_new = resty_chash.new
+      resty_chash.new = function() error("table overflow") end
+
+      assert.has_error(function() instance:sync(get_test_backend(3)) end)
+
+      resty_chash.new = original_new
+      assert.are.equal(old_ring, instance.instance)
+      assert.are.equal(old_subsets, instance.subsets)
+      assert.are.equal(old_endpoints, instance.current_endpoints)
+    end)
+
     it("set alternative backends", function()
       local backend = get_test_backend(7)
       backend.trafficShapingPolicy  = {

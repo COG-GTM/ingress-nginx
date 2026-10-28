@@ -13,6 +13,7 @@ local string = string
 local ipairs = ipairs
 local table = table
 local getmetatable = getmetatable
+local pcall = pcall
 local tostring = tostring
 local pairs = pairs
 local math = math
@@ -103,10 +104,21 @@ local function is_backend_with_external_name(backend)
   return serv_type == "ExternalName"
 end
 
+-- a failure while building one backend's balancer must not abort the sync
+-- of the remaining backends
+local function new_balancer(implementation, backend)
+  local ok, instance = pcall(implementation.new, implementation, backend)
+  if not ok then
+    ngx.log(ngx.ERR, "failed to create balancer for backend ", backend.name, ": ", instance)
+    return nil
+  end
+  return instance
+end
+
 local function sync_backend(backend)
   if not backend.endpoints or #backend.endpoints == 0 then
     balancers[backend.name] = nil
-    return
+    return true
   end
 
   if is_backend_with_external_name(backend) then
@@ -119,8 +131,9 @@ local function sync_backend(backend)
   local balancer = balancers[backend.name]
 
   if not balancer then
-    balancers[backend.name] = implementation:new(backend)
-    return
+    local instance = new_balancer(implementation, backend)
+    balancers[backend.name] = instance
+    return instance ~= nil
   end
 
   -- every implementation is the metatable of its instances (see .new(...) functions)
@@ -130,11 +143,21 @@ local function sync_backend(backend)
     ngx.log(ngx.INFO,
         string.format("LB algorithm changed from %s to %s, resetting the instance",
                       balancer.name, implementation.name))
-    balancers[backend.name] = implementation:new(backend)
-    return
+    local instance = new_balancer(implementation, backend)
+    if not instance then
+      -- keep serving with the previous balancer until a rebuild succeeds
+      return false
+    end
+    balancers[backend.name] = instance
+    return true
   end
 
-  balancer:sync(backend)
+  local ok, err = pcall(balancer.sync, balancer, backend)
+  if not ok then
+    ngx.log(ngx.ERR, "failed to sync balancer for backend ", backend.name, ": ", err)
+    return false
+  end
+  return true
 end
 
 local function sync_backends_with_external_name()
@@ -162,12 +185,13 @@ local function sync_backends()
   end
 
   local balancers_to_keep = {}
+  local all_synced = true
   for _, new_backend in ipairs(new_backends) do
     if is_backend_with_external_name(new_backend) then
       local backend_with_external_name = util.deepcopy(new_backend)
       backends_with_external_name[backend_with_external_name.name] = backend_with_external_name
-    else
-      sync_backend(new_backend)
+    elseif sync_backend(new_backend) == false then
+      all_synced = false
     end
     balancers_to_keep[new_backend.name] = true
   end
@@ -178,7 +202,10 @@ local function sync_backends()
       backends_with_external_name[backend_name] = nil
     end
   end
-  backends_last_synced_at = raw_backends_last_synced_at
+  -- leave the timestamp untouched so a failed backend is retried next tick
+  if all_synced then
+    backends_last_synced_at = raw_backends_last_synced_at
+  end
 end
 
 local function route_to_alternative_balancer(balancer)

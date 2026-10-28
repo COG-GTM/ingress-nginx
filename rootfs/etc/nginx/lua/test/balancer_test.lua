@@ -495,6 +495,58 @@ describe("Balancer", function()
       assert.has_no.errors(function() balancer.sync_backend(backend) end)
       assert.stub(mock_instance.sync).was_called_with(mock_instance, backend)
     end)
+
+    it("logs and does not raise when the balancer implementation fails to build", function()
+      local original_new = implementation.new
+      implementation.new = function() error("table overflow") end
+      local s_ngx_log = spy.on(ngx, "log")
+
+      local ok
+      assert.has_no.errors(function() ok = balancer.sync_backend(backend) end)
+      assert.is_false(ok)
+      assert.spy(s_ngx_log).was_called_with(ngx.ERR, "failed to create balancer for backend ",
+        backend.name, ": ", match.has_match("table overflow"))
+
+      implementation.new = original_new
+    end)
+
+    it("keeps the previous balancer when rebuilding after an algorithm change fails", function()
+      local original_impl_new = implementation.new
+      local old_instance = { name = "previous", sync = function() end }
+      setmetatable(old_instance, implementation)
+      implementation.new = function() return old_instance end
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      implementation.new = original_impl_new
+
+      local new_implementation = package.loaded["balancer.ewma"]
+      local original_new = new_implementation.new
+      new_implementation.new = function() error("table overflow") end
+      backend["load-balance"] = "ewma"
+
+      local ok
+      assert.has_no.errors(function() ok = balancer.sync_backend(backend) end)
+      assert.is_false(ok)
+      assert.equal(old_instance, balancer.get_balancer_by_upstream_name(backend.name))
+
+      new_implementation.new = original_new
+    end)
+
+    it("logs and does not raise when an existing balancer fails to sync", function()
+      local original_new = implementation.new
+      local mock_instance = { sync = function() error("sync failed") end }
+      setmetatable(mock_instance, implementation)
+      implementation.new = function() return mock_instance end
+      assert.has_no.errors(function() balancer.sync_backend(backend) end)
+      local s_ngx_log = spy.on(ngx, "log")
+
+      local ok
+      assert.has_no.errors(function() ok = balancer.sync_backend(backend) end)
+      assert.is_false(ok)
+      assert.spy(s_ngx_log).was_called_with(ngx.ERR, "failed to sync balancer for backend ",
+        backend.name, ": ", match.has_match("sync failed"))
+
+      implementation.new = original_new
+    end)
   end)
 
   describe("sync_backends()", function()

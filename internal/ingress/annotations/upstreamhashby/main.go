@@ -17,7 +17,9 @@ limitations under the License.
 package upstreamhashby
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 
 	networking "k8s.io/api/networking/v1"
 
@@ -30,6 +32,11 @@ const (
 	upstreamHashByAnnotation       = "upstream-hash-by"
 	upstreamHashBySubsetAnnotation = "upstream-hash-by-subset"
 	upstreamHashBySubsetSize       = "upstream-hash-by-subset-size"
+
+	defaultSubsetSize = 3
+	// MaxSubsetSize is the largest accepted upstream-hash-by-subset-size. The
+	// Lua balancer allocates one table entry per subset slot in every worker.
+	MaxSubsetSize = 1024
 )
 
 var (
@@ -54,12 +61,24 @@ var upstreamHashByAnnotations = parser.Annotation{
 			Documentation: `This annotation maps requests to subset of nodes instead of a single one.`,
 		},
 		upstreamHashBySubsetSize: {
-			Validator:     parser.ValidateInt,
+			Validator:     validateSubsetSize,
 			Scope:         parser.AnnotationScopeLocation,
 			Risk:          parser.AnnotationRiskLow,
-			Documentation: `This annotation determines the size of each subset (default 3)`,
+			Documentation: `This annotation determines the size of each subset (default 3, maximum 1024)`,
 		},
 	},
+}
+
+// validateSubsetSize accepts 0 (use the default) or an integer between 1 and MaxSubsetSize.
+func validateSubsetSize(value string) error {
+	size, err := strconv.Atoi(value)
+	if err != nil {
+		return err
+	}
+	if size < 0 || size > MaxSubsetSize {
+		return fmt.Errorf("%s must be between 1 and %d, got %d", upstreamHashBySubsetSize, MaxSubsetSize, size)
+	}
+	return nil
 }
 
 type upstreamhashby struct {
@@ -97,8 +116,12 @@ func (a upstreamhashby) Parse(ing *networking.Ingress) (interface{}, error) {
 		return nil, err
 	}
 
+	if upstreamHashbySubsetSize < 0 || upstreamHashbySubsetSize > MaxSubsetSize {
+		return nil, errors.NewValidationError(parser.GetAnnotationWithPrefix(upstreamHashBySubsetSize))
+	}
+
 	if upstreamHashbySubsetSize == 0 {
-		upstreamHashbySubsetSize = 3
+		upstreamHashbySubsetSize = defaultSubsetSize
 	}
 
 	return &Config{upstreamHashBy, upstreamHashBySubset, upstreamHashbySubsetSize}, nil
