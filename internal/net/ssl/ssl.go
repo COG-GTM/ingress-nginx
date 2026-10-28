@@ -374,7 +374,7 @@ func AddOrUpdateDHParam(name string, dh []byte) (string, error) {
 		return "", err
 	}
 
-	tempPemFile, err := os.CreateTemp(file.DefaultSSLDirectory, pemName)
+	tempPemFile, err := os.CreateTemp(file.DefaultSSLDirectory, "dhparam-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("could not create temp pem file %v: %v", pemFileName, err)
 	}
