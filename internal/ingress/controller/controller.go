@@ -409,10 +409,13 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 		return err
 	}
 
-	err = checkAliasOverlap(ing, parsed.Aliases, servers)
-	if err != nil {
-		n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
-		return err
+	// createServers ignores the aliases of canary ingresses.
+	if !parsed.Canary.Enabled {
+		err = checkAliasOverlap(ing, parsed.Aliases, servers)
+		if err != nil {
+			n.metricCollector.IncCheckErrorCount(ing.ObjectMeta.Namespace, ing.Name)
+			return err
+		}
 	}
 	testedSize := len(ings)
 	if n.cfg.DisableFullValidationTest {
@@ -1880,29 +1883,27 @@ func checkAliasOverlap(ing *networking.Ingress, aliases []string, servers []*ing
 
 	ownHosts := sets.NewString()
 	for _, rule := range ing.Spec.Rules {
-		host := rule.Host
-		if host == "" {
-			host = defServerName
-		}
-		ownHosts.Insert(host)
+		ownHosts.Insert(rule.Host)
 	}
 
 	for _, alias := range aliases {
 		for _, server := range servers {
-			if ownHosts.Has(server.Hostname) || server.Hostname == defServerName {
+			if server.Hostname == defServerName {
 				continue
 			}
 
-			if !aliasConflictsWithHost(alias, server.Hostname) {
-				continue
-			}
-
-			owner := "another ingress"
-			for _, location := range server.Locations {
-				if location.Ingress != nil {
-					owner = fmt.Sprintf("ingress %s/%s", location.Ingress.Namespace, location.Ingress.Name)
-					break
+			// A host of ing is exempt only when no other ingress defines locations in it, so
+			// adding a path under another tenant's host does not exempt that host.
+			owner := foreignIngressOwner(ing, server)
+			if owner == "" {
+				if ownHosts.Has(server.Hostname) {
+					continue
 				}
+				owner = "another ingress"
+			}
+
+			if normalizeServerName(alias) == server.Hostname || !aliasConflictsWithHost(alias, server.Hostname) {
+				continue
 			}
 
 			return fmt.Errorf(`server-alias "%s" overlaps host "%s" already defined in %s`, alias, server.Hostname, owner)
@@ -1910,6 +1911,21 @@ func checkAliasOverlap(ing *networking.Ingress, aliases []string, servers []*ing
 	}
 
 	return nil
+}
+
+// foreignIngressOwner returns a description of an ingress other than ing that defines a
+// location in server, or "" when every location belongs to ing.
+func foreignIngressOwner(ing *networking.Ingress, server *ingress.Server) string {
+	for _, location := range server.Locations {
+		if location.Ingress == nil {
+			continue
+		}
+		if location.Ingress.Namespace == ing.Namespace && location.Ingress.Name == ing.Name {
+			continue
+		}
+		return fmt.Sprintf("ingress %s/%s", location.Ingress.Namespace, location.Ingress.Name)
+	}
+	return ""
 }
 
 func ingressForHostPath(hostname, path string, servers []*ingress.Server) []*networking.Ingress {
