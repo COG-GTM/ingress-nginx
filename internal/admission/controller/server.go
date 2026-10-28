@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	goruntime "runtime"
+	"sync"
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -45,9 +46,15 @@ type AdmissionController interface {
 
 const (
 	// MaxRequestBodyBytes caps the size of an AdmissionReview request body.
-	// The API server limits objects to 1.5MiB in etcd and an AdmissionReview
-	// carries at most the object and the old object.
-	MaxRequestBodyBytes int64 = 4 << 20
+	// An AdmissionReview carries the object (at most 3MiB, the API server's
+	// request body limit) and the old object (at most 1.5MiB in etcd), and JSON
+	// encoding can expand a string by up to 6x (e.g. "<" becomes "\u003c").
+	MaxRequestBodyBytes int64 = 32 << 20
+
+	// MaxInFlightBodyBytes caps the total size of request bodies held in
+	// memory at the same time; further requests are rejected with 429.
+	// Bodies without a Content-Length reserve MaxRequestBodyBytes.
+	MaxInFlightBodyBytes int64 = 2 * MaxRequestBodyBytes
 
 	// MaxInFlightRequests caps the number of requests being read, decoded or
 	// queued at the same time; further requests are rejected with 429.
@@ -71,7 +78,34 @@ type AdmissionControllerServer struct {
 	maxRequestBodyBytes int64
 	queueTimeout        time.Duration
 	inFlight            chan struct{}
+	bodyBytes           *byteBudget
 	admissions          chan struct{}
+}
+
+// byteBudget is a non-blocking counting semaphore over a number of bytes.
+type byteBudget struct {
+	mu        sync.Mutex
+	available int64
+}
+
+func newByteBudget(n int64) *byteBudget {
+	return &byteBudget{available: n}
+}
+
+func (b *byteBudget) tryAcquire(n int64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n > b.available {
+		return false
+	}
+	b.available -= n
+	return true
+}
+
+func (b *byteBudget) release(n int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.available += n
 }
 
 // NewAdmissionControllerServer instantiates an admission controller server with
@@ -82,6 +116,7 @@ func NewAdmissionControllerServer(ac AdmissionController) *AdmissionControllerSe
 		maxRequestBodyBytes: MaxRequestBodyBytes,
 		queueTimeout:        AdmissionQueueTimeout,
 		inFlight:            make(chan struct{}, MaxInFlightRequests),
+		bodyBytes:           newByteBudget(MaxInFlightBodyBytes),
 		admissions:          make(chan struct{}, maxConcurrentAdmissions()),
 	}
 }
@@ -115,6 +150,17 @@ func (acs *AdmissionControllerServer) ServeHTTP(w http.ResponseWriter, req *http
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		return
 	}
+
+	reserved := acs.maxRequestBodyBytes
+	if req.ContentLength >= 0 {
+		reserved = req.ContentLength
+	}
+	if !acs.bodyBytes.tryAcquire(reserved) {
+		klog.Warning("Rejecting admission request: too many request body bytes in flight")
+		tooManyRequests(w)
+		return
+	}
+	defer acs.bodyBytes.release(reserved)
 
 	data, err := io.ReadAll(http.MaxBytesReader(w, req.Body, acs.maxRequestBodyBytes))
 	if err != nil {

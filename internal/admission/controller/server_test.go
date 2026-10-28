@@ -219,6 +219,48 @@ func TestServeHTTPRejectsWhenTooManyInFlight(t *testing.T) {
 	}
 }
 
+func TestServeHTTPAcceptsWorstCaseEscapedReview(t *testing.T) {
+	ac := &countingAdmissionController{}
+	s := NewAdmissionControllerServer(ac)
+	escaped := strings.Repeat(`\u003c`, 1536<<10)
+	body := `{"apiVersion":"admission.k8s.io/v1","kind":"AdmissionReview","request":{"uid":"1",` +
+		`"object":{"metadata":{"annotations":{"a":"` + escaped + escaped + `"}}},` +
+		`"oldObject":{"metadata":{"annotations":{"a":"` + escaped + `"}}}}}`
+	w := post(s, strings.NewReader(body), int64(len(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a %d byte review, got %d", len(body), w.Code)
+	}
+}
+
+func TestServeHTTPRejectsWhenBodyBudgetExhausted(t *testing.T) {
+	ac := &countingAdmissionController{}
+	s := NewAdmissionControllerServer(ac)
+	if !s.bodyBytes.tryAcquire(MaxInFlightBodyBytes - int64(len(admissionReviewBody)) + 1) {
+		t.Fatal("expected to reserve body budget")
+	}
+
+	w := post(s, strings.NewReader(admissionReviewBody), int64(len(admissionReviewBody)))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+
+	body := &countingReader{limit: 1 << 10}
+	if w := post(s, body, -1); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for body without Content-Length, got %d", w.Code)
+	}
+	if body.read != 0 {
+		t.Fatalf("expected body not to be read, read %d bytes", body.read)
+	}
+	if ac.calls.Load() != 0 {
+		t.Fatal("admission controller must not be called")
+	}
+
+	s.bodyBytes.release(MaxInFlightBodyBytes - int64(len(admissionReviewBody)) + 1)
+	if w := post(s, strings.NewReader(admissionReviewBody), int64(len(admissionReviewBody))); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 after budget release, got %d", w.Code)
+	}
+}
+
 // countingReader yields up to limit bytes of padding and records how many were read.
 type countingReader struct {
 	limit int64
