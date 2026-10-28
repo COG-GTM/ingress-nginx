@@ -30,10 +30,12 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/ingress-nginx/internal/nginx"
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
+	"k8s.io/ingress-nginx/pkg/tcpproxy"
 )
 
 func TestConfigureDynamically(t *testing.T) {
@@ -443,4 +445,34 @@ func tryListen(network, address string) (l net.Listener, err error) {
 	}
 	err = wait.ExponentialBackoff(backoff, condFunc)
 	return
+}
+
+func TestPassthroughServers(t *testing.T) {
+	svc := &apiv1.Service{
+		Spec: apiv1.ServiceSpec{
+			ClusterIP: "10.0.0.10",
+			Ports:     []apiv1.ServicePort{{Name: "https", Port: 8443}},
+		},
+	}
+	cfg := &ingress.Configuration{
+		PassthroughBackends: []*ingress.SSLPassthroughBackend{
+			{Hostname: "by-number.example.com", Service: svc, Port: intstr.FromInt(8443)},
+			{Hostname: "by-name.example.com", Service: svc, Port: intstr.FromString("https")},
+			{Hostname: "no-service.example.com", Backend: "missing", Port: intstr.FromInt(443)},
+		},
+	}
+
+	got := passthroughServers(cfg)
+	want := []*tcpproxy.TCPServer{
+		{Hostname: "by-number.example.com", IP: "10.0.0.10", Port: 8443},
+		{Hostname: "by-name.example.com", IP: "10.0.0.10", Port: 8443},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d servers, got %d: %+v", len(want), len(got), got)
+	}
+	for i := range want {
+		if *got[i] != *want[i] {
+			t.Errorf("server %d: expected %+v, got %+v", i, want[i], got[i])
+		}
+	}
 }
