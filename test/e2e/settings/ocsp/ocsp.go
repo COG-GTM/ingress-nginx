@@ -50,6 +50,8 @@ var _ = framework.DescribeSetting("OCSP", func() {
 	ginkgo.It("should enable OCSP and contain stapling information in the connection", func() {
 		host := "www.example.com"
 
+		// the responder runs as an in-cluster Service
+		f.UpdateNginxConfigMapData("ocsp-responder-allowed-cidrs", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7")
 		f.UpdateNginxConfigMapData("enable-ocsp", "true")
 
 		err := prepareCertificates(f.Namespace)

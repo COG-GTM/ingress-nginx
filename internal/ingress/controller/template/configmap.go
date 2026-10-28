@@ -47,6 +47,7 @@ const (
 	bindAddress                   = "bind-address"
 	httpRedirectCode              = "http-redirect-code"
 	blockCIDRs                    = "block-cidrs"
+	ocspResponderAllowedCIDRs     = "ocsp-responder-allowed-cidrs"
 	blockUserAgents               = "block-user-agents"
 	blockReferers                 = "block-referers"
 	proxyStreamResponses          = "proxy-stream-responses"
@@ -214,6 +215,20 @@ func ReadConfig(src map[string]string) config.Configuration {
 	if val, ok := conf[blockCIDRs]; ok {
 		delete(conf, blockCIDRs)
 		blockCIDRList = splitAndTrimSpace(val, ",")
+	}
+
+	ocspAllowedCIDRs := make([]string, 0)
+	if val, ok := conf[ocspResponderAllowedCIDRs]; ok {
+		delete(conf, ocspResponderAllowedCIDRs)
+		for _, cidr := range splitAndTrimSpace(val, ",") {
+			if net.ParseIP(cidr) == nil {
+				if _, _, err := net.ParseCIDR(cidr); err != nil {
+					klog.Warningf("ignoring invalid %v entry %q: %v", ocspResponderAllowedCIDRs, cidr, err)
+					continue
+				}
+			}
+			ocspAllowedCIDRs = append(ocspAllowedCIDRs, cidr)
+		}
 	}
 
 	if val, ok := conf[blockUserAgents]; ok {
@@ -443,6 +458,7 @@ func ReadConfig(src map[string]string) config.Configuration {
 	to.BindAddressIpv4 = bindAddressIpv4List
 	to.BindAddressIpv6 = bindAddressIpv6List
 	to.BlockCIDRs = blockCIDRList
+	to.OCSPResponderAllowedCIDRs = ocspAllowedCIDRs
 	to.BlockUserAgents = blockUserAgentList
 	to.BlockReferers = blockRefererList
 	to.HideHeaders = hideHeadersList

@@ -50,4 +50,9 @@ else
   if configfile.enable_ocsp then
     certificate.is_ocsp_stapling_enabled = configfile.enable_ocsp
   end
+  local cidrs_err = certificate.set_ocsp_responder_allowed_cidrs(
+    configfile.ocsp_responder_allowed_cidrs)
+  if cidrs_err then
+    ngx.log(ngx.ERR, "ignoring ocsp-responder-allowed-cidrs: ", cidrs_err)
+  end
 end

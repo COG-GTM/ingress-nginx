@@ -209,18 +209,19 @@ The json format should follow what's expected by lua:
 */
 
 type LuaConfig struct {
-	EnableMetrics           bool           `json:"enable_metrics"`
-	ListenPorts             LuaListenPorts `json:"listen_ports"`
-	UseForwardedHeaders     bool           `json:"use_forwarded_headers"`
-	UseProxyProtocol        bool           `json:"use_proxy_protocol"`
-	IsSSLPassthroughEnabled bool           `json:"is_ssl_passthrough_enabled"`
-	HTTPRedirectCode        int            `json:"http_redirect_code"`
-	EnableOCSP              bool           `json:"enable_ocsp"`
-	MonitorBatchMaxSize     int            `json:"monitor_batch_max_size"`
-	HSTS                    bool           `json:"hsts"`
-	HSTSMaxAge              string         `json:"hsts_max_age"`
-	HSTSIncludeSubdomains   bool           `json:"hsts_include_subdomains"`
-	HSTSPreload             bool           `json:"hsts_preload"`
+	EnableMetrics             bool           `json:"enable_metrics"`
+	ListenPorts               LuaListenPorts `json:"listen_ports"`
+	UseForwardedHeaders       bool           `json:"use_forwarded_headers"`
+	UseProxyProtocol          bool           `json:"use_proxy_protocol"`
+	IsSSLPassthroughEnabled   bool           `json:"is_ssl_passthrough_enabled"`
+	HTTPRedirectCode          int            `json:"http_redirect_code"`
+	EnableOCSP                bool           `json:"enable_ocsp"`
+	OCSPResponderAllowedCIDRs []string       `json:"ocsp_responder_allowed_cidrs"`
+	MonitorBatchMaxSize       int            `json:"monitor_batch_max_size"`
+	HSTS                      bool           `json:"hsts"`
+	HSTSMaxAge                string         `json:"hsts_max_age"`
+	HSTSIncludeSubdomains     bool           `json:"hsts_include_subdomains"`
+	HSTSPreload               bool           `json:"hsts_preload"`
 }
 
 type LuaListenPorts struct {

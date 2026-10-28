@@ -52,6 +52,7 @@ The following table shows a configuration option's name, type, and the default v
 | [disable-ipv6-dns](#disable-ipv6-dns)                                           | bool         | "false"                                                                                                                                                                                                                                                                                                                                                      |                                                                                     |
 | [enable-underscores-in-headers](#enable-underscores-in-headers)                 | bool         | "false"                                                                                                                                                                                                                                                                                                                                                      |                                                                                     |
 | [enable-ocsp](#enable-ocsp)                                                     | bool         | "false"                                                                                                                                                                                                                                                                                                                                                      |                                                                                     |
+| [ocsp-responder-allowed-cidrs](#ocsp-responder-allowed-cidrs)                   | []string     | ""                                                                                                                                                                                                                                                                                                                                                           |                                                                                     |
 | [ignore-invalid-headers](#ignore-invalid-headers)                               | bool         | "true"                                                                                                                                                                                                                                                                                                                                                       |                                                                                     |
 | [retry-non-idempotent](#retry-non-idempotent)                                   | bool         | "false"                                                                                                                                                                                                                                                                                                                                                      |                                                                                     |
 | [error-log-level](#error-log-level)                                             | string       | "notice"                                                                                                                                                                                                                                                                                                                                                     |                                                                                     |
@@ -384,6 +385,17 @@ Enables underscores in header names. _**default:**_ is disabled
 
 Enables [Online Certificate Status Protocol stapling](https://en.wikipedia.org/wiki/OCSP_stapling) (OCSP) support.
 _**default:**_ is disabled
+
+The OCSP responder URL is read from the certificate. Requests are only sent to responders that resolve exclusively to public unicast addresses;
+responders on private, loopback, link-local (e.g. cloud metadata), shared or reserved addresses are refused and logged, unless listed in
+[ocsp-responder-allowed-cidrs](#ocsp-responder-allowed-cidrs). A failed fetch for a certificate is retried after 5 minutes at the earliest.
+
+## ocsp-responder-allowed-cidrs
+
+A comma-separated list of IP addresses or CIDRs of non-public networks that OCSP responders may be reached on, e.g. the Service CIDR of
+the cluster when an internal CA runs its OCSP responder in-cluster. Any tenant able to create a TLS Secret can make the controller send OCSP
+requests to these networks, so keep this list as narrow as possible.
+_**default:**_ ""
 
 ## ignore-invalid-headers
 
