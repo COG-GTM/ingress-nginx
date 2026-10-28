@@ -36,6 +36,10 @@ const (
 
 var OnOffRegex = regexp.MustCompile(`^(on|off)$`)
 
+// uidRegex restricts the Ingress UID, which is used to build an nginx location
+// name, to characters that cannot alter the generated configuration.
+var uidRegex = regexp.MustCompile(`^[A-Za-z0-9-]*$`)
+
 var mirrorAnnotation = parser.Annotation{
 	Group: "mirror",
 	Annotations: parser.AnnotationFields{
@@ -113,6 +117,10 @@ func NewParser(r resolver.Resolver) parser.IngressAnnotation {
 // ParseAnnotations parses the annotations contained in the ingress
 // rule used to configure mirror
 func (a mirror) Parse(ing *networking.Ingress) (interface{}, error) {
+	if !uidRegex.MatchString(string(ing.UID)) {
+		return nil, errors.NewValidationError(mirrorTargetAnnotation)
+	}
+
 	config := &Config{
 		Source: fmt.Sprintf("/_mirror-%v", ing.UID),
 	}

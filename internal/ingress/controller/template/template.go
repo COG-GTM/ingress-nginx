@@ -803,6 +803,29 @@ func filterRateLimits(input interface{}) []ratelimit.Config {
 	return ratelimits
 }
 
+var (
+	nginxZoneNameRegex     = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	nginxRateLimitIDRegex  = regexp.MustCompile(`^[A-Za-z0-9_-]*$`)
+	nginxMirrorSourceRegex = regexp.MustCompile(`^/_mirror-[A-Za-z0-9-]*$`)
+)
+
+// isSafeRateLimit verifies the rate limit identifiers of a location only
+// contain characters that cannot alter the generated nginx configuration.
+func isSafeRateLimit(loc *ingress.Location) bool {
+	if !nginxRateLimitIDRegex.MatchString(loc.RateLimit.ID) {
+		return false
+	}
+
+	zones := []ratelimit.Zone{loc.RateLimit.Connections, loc.RateLimit.RPS, loc.RateLimit.RPM}
+	for _, zone := range zones {
+		if zone.Limit > 0 && !nginxZoneNameRegex.MatchString(zone.Name) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // buildRateLimitZones produces an array of limit_conn_zone in order to allow
 // rate limiting of request. Each Ingress rule could have up to three zones, one
 // for connection limit by IP address, one for limiting requests per minute, and
@@ -818,6 +841,11 @@ func buildRateLimitZones(input interface{}) []string {
 
 	for _, server := range servers {
 		for _, loc := range server.Locations {
+			if !isSafeRateLimit(loc) {
+				klog.Errorf("skipping rate limit zones with invalid name %q", loc.RateLimit.Name)
+				continue
+			}
+
 			if loc.RateLimit.Connections.Limit > 0 {
 				zone := fmt.Sprintf("limit_conn_zone $limit_%s zone=%v:%vm;",
 					loc.RateLimit.ID,
@@ -863,6 +891,11 @@ func buildRateLimit(input interface{}) []string {
 	loc, ok := input.(*ingress.Location)
 	if !ok {
 		klog.Errorf("expected an '*ingress.Location' type but %T was returned", input)
+		return limits
+	}
+
+	if !isSafeRateLimit(loc) {
+		klog.Errorf("skipping rate limits with invalid name %q", loc.RateLimit.Name)
 		return limits
 	}
 
@@ -1620,12 +1653,17 @@ func buildMirrorLocations(locs []*ingress.Location) string {
 			continue
 		}
 
+		if !nginxMirrorSourceRegex.MatchString(loc.Mirror.Source) {
+			klog.Errorf("skipping mirror location with invalid source %q", loc.Mirror.Source)
+			continue
+		}
+
 		if mapped.Has(loc.Mirror.Source) {
 			continue
 		}
 
 		mapped.Insert(loc.Mirror.Source)
-		buffer.WriteString(fmt.Sprintf(`location = %v {
+		buffer.WriteString(fmt.Sprintf(`location = %q {
 internal;
 proxy_set_header Host "%v";
 proxy_pass "%v";

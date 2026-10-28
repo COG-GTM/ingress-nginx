@@ -990,7 +990,6 @@ func TestBuildRateLimit(t *testing.T) {
 	}
 }
 
-// TODO: Needs more tests
 func TestBuildRateLimitZones(t *testing.T) {
 	invalidType := &ingress.Ingress{}
 	expected := []string{}
@@ -998,6 +997,59 @@ func TestBuildRateLimitZones(t *testing.T) {
 
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Expected '%v' but returned '%v'", expected, actual)
+	}
+
+	newLoc := func(name string) *ingress.Location {
+		loc := &ingress.Location{}
+		loc.RateLimit.ID = "abc"
+		loc.RateLimit.Connections = ratelimit.Zone{Name: name + "_conn", Limit: 1, SharedSize: 5}
+		loc.RateLimit.RPS = ratelimit.Zone{Name: name + "_rps", Limit: 1, SharedSize: 5}
+		loc.RateLimit.RPM = ratelimit.Zone{Name: name + "_rpm", Limit: 1, SharedSize: 5}
+		return loc
+	}
+
+	servers := []*ingress.Server{{Locations: []*ingress.Location{newLoc("default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256")}}}
+	zones := buildRateLimitZones(servers)
+	if len(zones) != 3 {
+		t.Errorf("Expected 3 zones but returned %v", zones)
+	}
+
+	malicious := "default_foo_x;\n}\nssl_engine /tmp/x.so;\nhttp {"
+	servers = []*ingress.Server{{Locations: []*ingress.Location{newLoc(malicious)}}}
+	zones = buildRateLimitZones(servers)
+	if len(zones) != 0 {
+		t.Errorf("Expected no zones for unsafe name but returned %v", zones)
+	}
+
+	limits := buildRateLimit(newLoc(malicious))
+	if len(limits) != 0 {
+		t.Errorf("Expected no limits for unsafe name but returned %v", limits)
+	}
+}
+
+func TestBuildMirrorLocations(t *testing.T) {
+	valid := &ingress.Location{}
+	valid.Mirror.Source = "/_mirror-c89a5111-b2e9-4af8-be19-c2a4a924c256"
+	valid.Mirror.Target = "http://mirror.example.com"
+	valid.Mirror.Host = "mirror.example.com"
+
+	malicious := &ingress.Location{}
+	malicious.Mirror.Source = "/_mirror-x;\nreturn 200;\n}\nssl_engine /tmp/x.so;"
+	malicious.Mirror.Target = "http://mirror.example.com"
+	malicious.Mirror.Host = "mirror.example.com"
+
+	out := buildMirrorLocations([]*ingress.Location{valid, malicious})
+
+	if !strings.Contains(out, `location = "/_mirror-c89a5111-b2e9-4af8-be19-c2a4a924c256" {`) {
+		t.Errorf("expected valid mirror location in output, got %q", out)
+	}
+
+	if strings.Contains(out, "ssl_engine") || strings.Contains(out, "return 200") {
+		t.Errorf("unsafe mirror source was rendered: %q", out)
+	}
+
+	if strings.Count(out, "location = ") != 1 {
+		t.Errorf("expected exactly one mirror location, got %q", out)
 	}
 }
 

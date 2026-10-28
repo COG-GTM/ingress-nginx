@@ -168,6 +168,30 @@ func (fakeTemplate) Write(conf *ngx_config.TemplateConfig) ([]byte, error) {
 	return r, nil
 }
 
+func TestValidateIngressMetadata(t *testing.T) {
+	testCases := []struct {
+		name      string
+		meta      metav1.ObjectMeta
+		expectErr bool
+	}{
+		{"valid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "c89a5111-b2e9-4af8-be19-c2a4a924c256"}, false},
+		{"empty uid", metav1.ObjectMeta{Name: "foo.bar", Namespace: "default"}, false},
+		{"opaque uid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "ing-12345"}, false},
+		{"invalid uid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "x;\nreturn 200;"}, true},
+		{"invalid name", metav1.ObjectMeta{Name: "foo;\n}", Namespace: "default"}, true},
+		{"invalid namespace", metav1.ObjectMeta{Name: "foo", Namespace: "default;"}, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateIngressMetadata(&networking.Ingress{ObjectMeta: tc.meta})
+			if tc.expectErr != (err != nil) {
+				t.Errorf("expected error: %v, got: %v", tc.expectErr, err)
+			}
+		})
+	}
+}
+
 func TestCheckIngress(t *testing.T) {
 	defer func() {
 		err := filepath.Walk(os.TempDir(), func(path string, info os.FileInfo, _ error) error {

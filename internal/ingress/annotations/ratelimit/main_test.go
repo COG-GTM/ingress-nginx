@@ -248,3 +248,22 @@ func TestAnnotationCIDR(t *testing.T) {
 		t.Errorf("expected 1 cidrs in limit by ip but %v was returned", len(rateLimit.Allowlist))
 	}
 }
+
+func TestRateLimitingInvalidMetadata(t *testing.T) {
+	data := map[string]string{}
+	data[parser.GetAnnotationWithPrefix(limitRateRPSAnnotation)] = "100"
+
+	for _, mutate := range []func(*networking.Ingress){
+		func(ing *networking.Ingress) { ing.UID = "x;\n}\nssl_engine /tmp/x.so;" },
+		func(ing *networking.Ingress) { ing.Name = "foo bar;" },
+		func(ing *networking.Ingress) { ing.Namespace = "ns{" },
+	} {
+		ing := buildIngress()
+		ing.SetAnnotations(data)
+		mutate(ing)
+
+		if _, err := NewParser(mockBackend{}).Parse(ing); err == nil {
+			t.Errorf("expected error for ingress with invalid metadata %v/%v/%v", ing.Namespace, ing.Name, ing.UID)
+		}
+	}
+}
