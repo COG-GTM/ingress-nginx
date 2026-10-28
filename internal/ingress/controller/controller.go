@@ -312,7 +312,7 @@ func (n *NGINXController) CheckWarning(ing *networking.Ingress) ([]string, error
 	return warnings, nil
 }
 
-var uidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var uidRegex = regexp.MustCompile(`^[A-Za-z0-9-]*$`)
 
 // validateIngressMetadata ensures the identifying metadata of an Ingress
 // received through the admission webhook is well formed. These values are
@@ -326,8 +326,8 @@ func validateIngressMetadata(ing *networking.Ingress) error {
 		return fmt.Errorf("name %q is invalid: %s", ing.Name, strings.Join(errs, ", "))
 	}
 
-	if ing.UID != "" && !uidRegex.MatchString(string(ing.UID)) {
-		return fmt.Errorf("uid %q is not a valid UUID", ing.UID)
+	if !uidRegex.MatchString(string(ing.UID)) {
+		return fmt.Errorf("uid %q contains invalid characters", ing.UID)
 	}
 
 	return nil

@@ -176,6 +176,7 @@ func TestValidateIngressMetadata(t *testing.T) {
 	}{
 		{"valid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "c89a5111-b2e9-4af8-be19-c2a4a924c256"}, false},
 		{"empty uid", metav1.ObjectMeta{Name: "foo.bar", Namespace: "default"}, false},
+		{"opaque uid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "ing-12345"}, false},
 		{"invalid uid", metav1.ObjectMeta{Name: "foo", Namespace: "default", UID: "x;\nreturn 200;"}, true},
 		{"invalid name", metav1.ObjectMeta{Name: "foo;\n}", Namespace: "default"}, true},
 		{"invalid namespace", metav1.ObjectMeta{Name: "foo", Namespace: "default;"}, true},
