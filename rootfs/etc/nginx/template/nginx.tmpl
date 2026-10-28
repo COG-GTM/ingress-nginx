@@ -1114,8 +1114,8 @@ stream {
 
             {{ buildOpentelemetryForLocation $all.Cfg.EnableOpentelemetry $all.Cfg.OpentelemetryTrustIncomingSpan $location }}
 
-            {{ if $location.Mirror.Source }}
-            mirror {{ $location.Mirror.Source }};
+            {{ if and $location.Mirror.Source (isValidMirrorSource $location.Mirror.Source) }}
+            mirror "{{ $location.Mirror.Source }}";
             mirror_request_body {{ $location.Mirror.RequestBody }};
             {{ end }}
 

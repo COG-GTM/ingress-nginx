@@ -38,6 +38,7 @@ import (
 	networking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"k8s.io/ingress-nginx/pkg/apis/ingress"
@@ -312,6 +313,35 @@ func TestCheckIngress(t *testing.T) {
 			ing.ObjectMeta.Annotations["nginx.ingress.kubernetes.io/custom-headers"] = "another_directive"
 			if err := nginx.CheckIngress(ing); err == nil {
 				t.Errorf("with an invalid value in annotation the ingress should be rejected")
+			}
+		})
+
+		t.Run("When the object metadata contains nginx directives", func(t *testing.T) {
+			nginx.store = &fakeIngressStore{
+				ingresses: []*ingress.Ingress{},
+			}
+			nginx.command = testNginxTestCommand{
+				t:        t,
+				err:      nil,
+				expected: "the nginx test must not run for an invalid object",
+			}
+			for _, meta := range []metav1.ObjectMeta{
+				{Name: ing.Name, Namespace: ing.Namespace, UID: types.UID("x;\nreturn 200;")},
+				{Name: ing.Name, Namespace: "ns;\n}", UID: "c89a5111-b2e9-4af8-be19-c2a4a924c256"},
+				{Name: "name\n}\nssl_engine /tmp/x;", Namespace: ing.Namespace, UID: "c89a5111-b2e9-4af8-be19-c2a4a924c256"},
+			} {
+				evil := ing.DeepCopy()
+				evil.ObjectMeta.Name = meta.Name
+				evil.ObjectMeta.Namespace = meta.Namespace
+				evil.ObjectMeta.UID = meta.UID
+				evil.ObjectMeta.Annotations = map[string]string{
+					"kubernetes.io/ingress.class":               "nginx",
+					"nginx.ingress.kubernetes.io/mirror-target": "https://test.env.com/$request_uri",
+					"nginx.ingress.kubernetes.io/limit-rps":     "10",
+				}
+				if err := nginx.CheckIngress(evil); err == nil {
+					t.Errorf("an ingress with metadata %+v should be rejected", meta)
+				}
 			}
 		})
 

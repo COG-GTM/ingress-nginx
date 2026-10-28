@@ -18,6 +18,7 @@ package mirror
 
 import (
 	"reflect"
+	"regexp"
 	"testing"
 
 	api "k8s.io/api/core/v1"
@@ -122,5 +123,30 @@ func TestParse(t *testing.T) {
 		if !reflect.DeepEqual(result, testCase.expected) {
 			t.Errorf("expected %+v but returned %+v, annotations: %s", testCase.expected, result, testCase.annotations)
 		}
+	}
+}
+
+func TestParseUntrustedUID(t *testing.T) {
+	ap := NewParser(&resolver.Mock{})
+	ing := &networking.Ingress{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      "foo",
+			Namespace: api.NamespaceDefault,
+			UID:       "x;\nreturn 200;",
+		},
+	}
+	ing.SetAnnotations(map[string]string{parser.GetAnnotationWithPrefix("mirror-target"): "https://test.env.com/$request_uri"})
+
+	result, err := ap.Parse(ing)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, ok := result.(*Config)
+	if !ok {
+		t.Fatalf("expected *Config, got %T", result)
+	}
+	source := cfg.Source
+	if !regexp.MustCompile(`^/_mirror-[0-9a-f]{64}$`).MatchString(source) {
+		t.Errorf("expected mirror source derived from a hash of the uid, got %q", source)
 	}
 }

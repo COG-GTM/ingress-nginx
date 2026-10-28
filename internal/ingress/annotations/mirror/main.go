@@ -114,7 +114,7 @@ func NewParser(r resolver.Resolver) parser.IngressAnnotation {
 // rule used to configure mirror
 func (a mirror) Parse(ing *networking.Ingress) (interface{}, error) {
 	config := &Config{
-		Source: fmt.Sprintf("/_mirror-%v", ing.UID),
+		Source: fmt.Sprintf("/_mirror-%v", parser.SafeNGINXIdentifier(string(ing.UID))),
 	}
 
 	var err error

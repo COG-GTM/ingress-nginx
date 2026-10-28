@@ -25,6 +25,8 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -35,6 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/ingress-nginx/internal/ingress/annotations/authreq"
+	"k8s.io/ingress-nginx/internal/ingress/annotations/mirror"
 	"k8s.io/ingress-nginx/internal/ingress/annotations/modsecurity"
 	"k8s.io/ingress-nginx/internal/ingress/annotations/opentelemetry"
 	"k8s.io/ingress-nginx/internal/ingress/annotations/ratelimit"
@@ -1954,5 +1957,70 @@ func TestCleanConf(t *testing.T) {
 			t.Error("failed to get diff for cleanConf", err)
 		}
 		t.Errorf("cleanConf result don't match with expected: %s", diff)
+	}
+}
+
+func TestBuildMirrorLocations(t *testing.T) {
+	locs := []*ingress.Location{
+		{Mirror: mirror.Config{Source: "/_mirror-c89a5111-b2e9-4af8-be19-c2a4a924c256", Host: "test.env.com", Target: "https://test.env.com/$request_uri"}},
+		{Mirror: mirror.Config{Source: "/_mirror-c89a5111-b2e9-4af8-be19-c2a4a924c256", Host: "test.env.com", Target: "https://test.env.com/$request_uri"}},
+		{Mirror: mirror.Config{Source: "/_mirror-x;\nreturn 200;", Host: "evil.com", Target: "https://evil.com"}},
+		{Mirror: mirror.Config{Source: "/_mirror-x {\n}\nssl_engine /proc/self/fd/9;\nlocation /y", Host: "evil.com", Target: "https://evil.com"}},
+	}
+
+	expected := `location = "/_mirror-c89a5111-b2e9-4af8-be19-c2a4a924c256" {
+internal;
+proxy_set_header Host "test.env.com";
+proxy_pass "https://test.env.com/$request_uri";
+}
+
+`
+	if actual := buildMirrorLocations(locs); actual != expected {
+		t.Errorf("Expected '%v' but returned '%v'", expected, actual)
+	}
+}
+
+func TestRateLimitUntrustedIdentifiers(t *testing.T) {
+	safe := ratelimit.Config{
+		Name:        "default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256",
+		ID:          "ZGVmYXVsdF9mb28",
+		Connections: ratelimit.Zone{Name: "default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256_conn", Limit: 1, SharedSize: 5},
+		RPS:         ratelimit.Zone{Name: "default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256_rps", Limit: 1, Burst: 5, SharedSize: 5},
+	}
+	evilZone := "default_foo_x:5m;\n}\nssl_engine /proc/self/fd/9;\nhttp {\nlimit_req_zone $a zone=b"
+	evil := ratelimit.Config{
+		Name:        evilZone,
+		ID:          "ZXZpbA",
+		Connections: ratelimit.Zone{Name: evilZone + "_conn", Limit: 1, SharedSize: 5},
+		RPS:         ratelimit.Zone{Name: evilZone + "_rps", Limit: 1, Burst: 5, SharedSize: 5},
+		RPM:         ratelimit.Zone{Name: evilZone + "_rpm", Limit: 1, Burst: 5, SharedSize: 5},
+	}
+	evilLoc := &ingress.Location{RateLimit: evil}
+	servers := []*ingress.Server{{Locations: []*ingress.Location{{RateLimit: safe}, evilLoc}}}
+
+	zones := buildRateLimitZones(servers)
+	sort.Strings(zones)
+	expectedZones := []string{
+		"limit_conn_zone $limit_ZGVmYXVsdF9mb28 zone=default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256_conn:5m;",
+		"limit_req_zone $limit_ZGVmYXVsdF9mb28 zone=default_foo_c89a5111-b2e9-4af8-be19-c2a4a924c256_rps:5m rate=1r/s;",
+	}
+	if !reflect.DeepEqual(expectedZones, zones) {
+		t.Errorf("Expected '%v' but returned '%v'", expectedZones, zones)
+	}
+
+	if limits := buildRateLimit(evilLoc); len(limits) != 0 {
+		t.Errorf("Expected no limits for an unsafe rate limit config but returned '%v'", limits)
+	}
+
+	filtered := filterRateLimits(servers)
+	if len(filtered) != 1 || filtered[0].ID != safe.ID {
+		t.Errorf("Expected only the safe rate limit config but returned '%v'", filtered)
+	}
+
+	safeChars := regexp.MustCompile(`^[A-Za-z0-9_\-/.:;=$ ]+$`)
+	for _, zone := range zones {
+		if !safeChars.MatchString(zone) || strings.Count(zone, ";") != 1 {
+			t.Errorf("zone directive %q contains unexpected characters", zone)
+		}
 	}
 }

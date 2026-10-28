@@ -328,6 +328,7 @@ var funcMap = text_template.FuncMap{
 	"shouldLoadOpentelemetryModule":      shouldLoadOpentelemetryModule,
 	"buildModSecurityForLocation":        buildModSecurityForLocation,
 	"buildMirrorLocations":               buildMirrorLocations,
+	"isValidMirrorSource":                isValidMirrorSource,
 	"shouldLoadAuthDigestModule":         shouldLoadAuthDigestModule,
 	"buildServerName":                    buildServerName,
 	"buildCorsOriginRegex":               buildCorsOriginRegex,
@@ -794,13 +795,44 @@ func filterRateLimits(input interface{}) []ratelimit.Config {
 	}
 	for _, server := range servers {
 		for _, loc := range server.Locations {
-			if loc.RateLimit.ID != "" && !found.Has(loc.RateLimit.ID) {
+			if loc.RateLimit.ID != "" && !found.Has(loc.RateLimit.ID) && isSafeRateLimit(&loc.RateLimit) {
 				found.Insert(loc.RateLimit.ID)
 				ratelimits = append(ratelimits, loc.RateLimit)
 			}
 		}
 	}
 	return ratelimits
+}
+
+var (
+	// rateLimitIdentifierRegex matches rate limit zone names and IDs that are safe
+	// to write unquoted into limit_req_zone, limit_conn_zone, geo and map directives.
+	rateLimitIdentifierRegex = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	// mirrorSourceRegex matches mirror locations that are safe to write into
+	// location and mirror directives.
+	mirrorSourceRegex = regexp.MustCompile(`^/_mirror-[A-Za-z0-9._-]*$`)
+)
+
+// isSafeRateLimit returns true when every identifier of the rate limit config
+// that is rendered into the nginx configuration is free of nginx syntax.
+func isSafeRateLimit(rl *ratelimit.Config) bool {
+	for _, name := range []string{rl.ID, rl.Name, rl.Connections.Name, rl.RPS.Name, rl.RPM.Name} {
+		if name != "" && !rateLimitIdentifierRegex.MatchString(name) {
+			klog.Errorf("ignoring rate limit configuration with invalid identifier %q", name)
+			return false
+		}
+	}
+	return true
+}
+
+// isValidMirrorSource returns true when the mirror source can be rendered into
+// the nginx configuration.
+func isValidMirrorSource(source string) bool {
+	if !mirrorSourceRegex.MatchString(source) {
+		klog.Errorf("ignoring mirror configuration with invalid source %q", source)
+		return false
+	}
+	return true
 }
 
 // buildRateLimitZones produces an array of limit_conn_zone in order to allow
@@ -818,6 +850,10 @@ func buildRateLimitZones(input interface{}) []string {
 
 	for _, server := range servers {
 		for _, loc := range server.Locations {
+			if !isSafeRateLimit(&loc.RateLimit) {
+				continue
+			}
+
 			if loc.RateLimit.Connections.Limit > 0 {
 				zone := fmt.Sprintf("limit_conn_zone $limit_%s zone=%v:%vm;",
 					loc.RateLimit.ID,
@@ -863,6 +899,10 @@ func buildRateLimit(input interface{}) []string {
 	loc, ok := input.(*ingress.Location)
 	if !ok {
 		klog.Errorf("expected an '*ingress.Location' type but %T was returned", input)
+		return limits
+	}
+
+	if !isSafeRateLimit(&loc.RateLimit) {
 		return limits
 	}
 
@@ -1620,12 +1660,12 @@ func buildMirrorLocations(locs []*ingress.Location) string {
 			continue
 		}
 
-		if mapped.Has(loc.Mirror.Source) {
+		if mapped.Has(loc.Mirror.Source) || !isValidMirrorSource(loc.Mirror.Source) {
 			continue
 		}
 
 		mapped.Insert(loc.Mirror.Source)
-		buffer.WriteString(fmt.Sprintf(`location = %v {
+		buffer.WriteString(fmt.Sprintf(`location = "%v" {
 internal;
 proxy_set_header Host "%v";
 proxy_pass "%v";

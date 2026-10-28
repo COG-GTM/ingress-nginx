@@ -17,6 +17,7 @@ limitations under the License.
 package ratelimit
 
 import (
+	"regexp"
 	"testing"
 
 	api "k8s.io/api/core/v1"
@@ -246,5 +247,34 @@ func TestAnnotationCIDR(t *testing.T) {
 	}
 	if len(rateLimit.Allowlist) != 1 {
 		t.Errorf("expected 1 cidrs in limit by ip but %v was returned", len(rateLimit.Allowlist))
+	}
+}
+
+func TestRateLimitingUntrustedMetadata(t *testing.T) {
+	ing := buildIngress()
+	ing.UID = "x;\n}\n}\nssl_engine /proc/self/fd/9;\nhttp {\nserver {\nlocation /y {"
+	ing.SetAnnotations(map[string]string{
+		parser.GetAnnotationWithPrefix(limitRateConnectionsAnnotation): "5",
+		parser.GetAnnotationWithPrefix(limitRateRPSAnnotation):         "100",
+		parser.GetAnnotationWithPrefix(limitRateRPMAnnotation):         "10",
+	})
+
+	i, err := NewParser(mockBackend{}).Parse(ing)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rateLimit, ok := i.(*Config)
+	if !ok {
+		t.Fatalf("expected a RateLimit type")
+	}
+
+	safe := regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	for _, name := range []string{rateLimit.Name, rateLimit.ID, rateLimit.Connections.Name, rateLimit.RPS.Name, rateLimit.RPM.Name} {
+		if !safe.MatchString(name) {
+			t.Errorf("rate limit identifier %q contains characters outside [A-Za-z0-9._-]", name)
+		}
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(rateLimit.Name) {
+		t.Errorf("expected zone name derived from a hash of the metadata, got %q", rateLimit.Name)
 	}
 }

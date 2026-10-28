@@ -320,6 +320,10 @@ func (n *NGINXController) CheckIngress(ing *networking.Ingress) error {
 		return nil
 	}
 
+	if err := inspector.ValidateObjectMeta(&ing.ObjectMeta); err != nil {
+		return fmt.Errorf("invalid object: %w", err)
+	}
+
 	// Skip checks if the ingress is marked as deleted
 	if !ing.DeletionTimestamp.IsZero() {
 		return nil
