@@ -22,8 +22,6 @@ import (
 	"net"
 
 	"k8s.io/klog/v2"
-
-	"pault.ag/go/sniff/parser"
 )
 
 // TCPServer describes a server that works in passthrough mode.
@@ -58,6 +56,11 @@ func (p *TCPProxy) Get(host string) *TCPServer {
 // Handle reads enough information from the connection to extract the hostname
 // and open a connection to the passthrough server.
 func (p *TCPProxy) Handle(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			klog.ErrorS(nil, "Recovered from panic while handling SSL passthrough connection", "remote", conn.RemoteAddr(), "panic", r)
+		}
+	}()
 	defer conn.Close()
 	// See: https://www.ibm.com/docs/en/ztpf/1.1.0.15?topic=sessions-ssl-record-format
 	data := make([]byte, 16384)
@@ -69,7 +72,7 @@ func (p *TCPProxy) Handle(conn net.Conn) {
 	}
 
 	proxy := p.Default
-	hostname, err := parser.GetHostname(data)
+	hostname, err := getHostname(data[:length])
 	if err == nil {
 		klog.V(4).InfoS("TLS Client Hello", "host", hostname)
 		proxy = p.Get(hostname)
