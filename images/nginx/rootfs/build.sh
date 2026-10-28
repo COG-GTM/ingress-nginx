@@ -101,6 +101,9 @@ export LUA_RESTY_IPMATCHER_VERSION=3e93c53eb8c9884efe939ef070486a0e507cc5be
 # Check for recent changes:  https://github.com/microsoft/mimalloc/compare/v2.1.7...master
 export MIMALOC_VERSION=v2.1.7
 
+# Check for recent changes: https://github.com/ssdeep-project/ssdeep/compare/release-2.14.1...master
+export SSDEEP_VERSION=release-2.14.1
+
 # Check on https://github.com/open-telemetry/opentelemetry-cpp
 export OPENTELEMETRY_CPP_VERSION="v1.11.0"
 # Check on https://github.com/open-telemetry/opentelemetry-proto
@@ -110,6 +113,10 @@ export BUILD_PATH=/tmp/build
 
 ARCH=$(uname -m)
 
+CHECKSUM_FAILURES=()
+
+# Downloads an archive, verifies its SHA-256 and extracts it. Mismatches are
+# collected so that all of them are reported before verify_sources aborts.
 get_src()
 {
   hash="$1"
@@ -120,9 +127,15 @@ get_src()
 
   echo "Downloading $url"
 
-  curl -sSL "$url" -o "$f"
-  # TODO: Reenable checksum verification but make it smarter
-  # echo "$hash  $f" | sha256sum -c - || exit 10
+  curl -fsSL --retry 3 "$url" -o "$f"
+  actual=$(sha256sum "$f" | cut -d' ' -f1)
+  if ! [[ "$hash" =~ ^[0-9a-f]{64}$ ]] || [ "$actual" != "$hash" ]; then
+    echo "Checksum verification failed for $url: expected $hash, got $actual" >&2
+    CHECKSUM_FAILURES+=("$url")
+    rm -f "$f"
+    return 0
+  fi
+  echo "$f: OK"
   if [ ! -z "$dest" ]; then
         mkdir ${BUILD_PATH}/${dest}
         ARGS="-C ${BUILD_PATH}/${dest} --strip-components=1"
@@ -198,10 +211,10 @@ get_src 66dc7081488811e9f925719e34d1b4504c2801c81dee2920e5452a86b11405ae \
 get_src aa961eafb8317e0eb8da37eb6e2c9ff42267edd18b56947384e719b85188f58b \
         "https://github.com/vision5/ngx_devel_kit/archive/$NDK_VERSION.tar.gz" "ngx_devel_kit"
 
-get_src abc123 \
+get_src 0000000000000000000000000000000000000000000000000000000000000000 \
         "https://github.com/open-telemetry/opentelemetry-cpp/archive/$OPENTELEMETRY_CPP_VERSION.tar.gz" "opentelemetry-cpp"
 
-get_src abc123 \
+get_src 0000000000000000000000000000000000000000000000000000000000000000 \
         "https://github.com/open-telemetry/opentelemetry-proto/archive/$OPENTELEMETRY_PROTO_VERSION.tar.gz" "opentelemetry-proto"
 
 get_src cd5e2cc834bcfa30149e7511f2b5a2183baf0b70dc091af717a89a64e44a2985 \
@@ -276,6 +289,20 @@ get_src efb767487ea3f6031577b9b224467ddbda2ad51a41c5867a47582d4ad85d609e \
 get_src d74f86ada2329016068bc5a243268f1f555edd620b6a7d6ce89295e7d6cf18da \
         "https://github.com/microsoft/mimalloc/archive/${MIMALOC_VERSION}.tar.gz" "mimalloc"
 
+get_src 0000000000000000000000000000000000000000000000000000000000000000 \
+        "https://github.com/ssdeep-project/ssdeep/archive/$SSDEEP_VERSION.tar.gz" "ssdeep"
+
+verify_sources()
+{
+  if [ ${#CHECKSUM_FAILURES[@]} -ne 0 ]; then
+    printf 'Checksum verification failed for:\n' >&2
+    printf '  %s\n' "${CHECKSUM_FAILURES[@]}" >&2
+    exit 10
+  fi
+}
+
+verify_sources
+
 # improve compilation times
 CORES=$(($(grep -c ^processor /proc/cpuinfo) - 1))
 
@@ -328,9 +355,7 @@ git reset --hard 63ca02abdcf79c9e788d2eedcc388d2335902e52
 git submodule init
 git submodule update
 
-cd "$BUILD_PATH"
-git clone --depth=1 https://github.com/ssdeep-project/ssdeep
-cd ssdeep/
+cd "$BUILD_PATH/ssdeep"
 
 ./bootstrap
 ./configure
