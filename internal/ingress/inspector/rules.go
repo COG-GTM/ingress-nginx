@@ -40,11 +40,11 @@ var (
 	// invalidPathCharacters matches characters that are part of the nginx configuration
 	// syntax (token separators, quotes, comments, statement and block delimiters) and
 	// therefore must never be part of an Ingress path, regardless of its pathType.
-	invalidPathCharacters = regexp.MustCompile("[\\s\\x00-\\x1f\\x7f;\"'`#]")
+	invalidPathCharacters = regexp.MustCompile("[ \\x00-\\x1f\\x7f;\"'`#]")
 
 	// regexQuantifier matches a regular expression repetition like {3}, {3,} or {3,5}.
 	// These are the only places where braces are accepted in a path.
-	regexQuantifier = regexp.MustCompile(`\{[0-9]+(,[0-9]*)?\}`)
+	regexQuantifier = regexp.MustCompile(`\{\d+(,\d*)?\}`)
 
 	invalidRegex = []regexp.Regexp{}
 )

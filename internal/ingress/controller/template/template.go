@@ -541,7 +541,7 @@ func buildLocation(input interface{}, enforceRegex bool) string {
 // nginxSyntaxChars matches characters that nginx treats as configuration syntax
 // in an unquoted token: whitespace, quotes, escapes, comments and statement or
 // block delimiters.
-var nginxSyntaxChars = regexp.MustCompile(`[\s\x00-\x1f\x7f;{}"'#\\]`)
+var nginxSyntaxChars = regexp.MustCompile(`[ \x00-\x1f\x7f;{}"'#\\]`)
 
 var nginxStringEscaper = strings.NewReplacer(
 	`\`, `\\`,
