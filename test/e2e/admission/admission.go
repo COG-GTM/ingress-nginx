@@ -281,7 +281,7 @@ kind: Ingress
 metadata:
   name: extensions-invalid
   annotations:
-    nginx.ingress.kubernetes.io/mirror-request-body: invalid
+    nginx.ingress.kubernetes.io/connection-proxy-header: "invalid directive"
 spec:
   ingressClassName: nginx
   rules:
