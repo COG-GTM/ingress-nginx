@@ -117,6 +117,138 @@ func ValidateRegex(regex *regexp.Regexp, removeSpace bool) AnnotationValidator {
 	}
 }
 
+// ValidateBacktrackingSafeRegex validates a PCRE pattern that nginx will match against
+// client-controlled input. The pattern must contain only IsValidRegex characters and must not
+// nest unbounded quantifiers (e.g. (a+)+, (a*)*, (a+){2,}), which can backtrack exponentially.
+func ValidateBacktrackingSafeRegex(s string) error {
+	if !IsValidRegex.MatchString(s) {
+		return fmt.Errorf("value %s is invalid", s)
+	}
+	if hasNestedUnboundedQuantifier(s) {
+		return fmt.Errorf("value %s contains nested unbounded quantifiers", s)
+	}
+	return nil
+}
+
+// hasNestedUnboundedQuantifier reports whether a repeated group in a PCRE pattern
+// contains an unbounded quantifier. Malformed patterns are left for PCRE to reject.
+func hasNestedUnboundedQuantifier(pattern string) bool {
+	// unbounded[i] tracks whether the i-th open group contains an unbounded quantifier
+	unbounded := []bool{false}
+	markUnbounded := func() { unbounded[len(unbounded)-1] = true }
+
+	closedGroupUnbounded := false
+	lastWasGroup := false
+	lastWasOpen := false
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		atomIsGroup := false
+		atomIsOpen := false
+		switch c {
+		case '\\':
+			if i+1 < len(pattern) && pattern[i+1] == 'Q' {
+				i = skipQuoted(pattern, i)
+				break
+			}
+			i++
+		case '[':
+			i = skipCharClass(pattern, i)
+		case '(':
+			unbounded = append(unbounded, false)
+			atomIsOpen = true
+		case ')':
+			if len(unbounded) == 1 {
+				return false
+			}
+			closedGroupUnbounded = unbounded[len(unbounded)-1]
+			unbounded = unbounded[:len(unbounded)-1]
+			if closedGroupUnbounded {
+				markUnbounded()
+			}
+			atomIsGroup = true
+		case '*', '+':
+			if lastWasOpen {
+				break
+			}
+			markUnbounded()
+			if lastWasGroup && closedGroupUnbounded {
+				return true
+			}
+		case '{':
+			repeatsMany, unboundedRepeat, end := parseRepeat(pattern, i)
+			if end < 0 {
+				break
+			}
+			i = end
+			if unboundedRepeat {
+				markUnbounded()
+			}
+			if repeatsMany && lastWasGroup && closedGroupUnbounded {
+				return true
+			}
+		}
+		lastWasGroup = atomIsGroup
+		lastWasOpen = atomIsOpen
+	}
+	return false
+}
+
+// skipQuoted returns the index of the last character of the \Q...\E literal span opened at start.
+func skipQuoted(pattern string, start int) int {
+	closing := strings.Index(pattern[start+2:], `\E`)
+	if closing < 0 {
+		return len(pattern)
+	}
+	return start + 2 + closing + 1
+}
+
+// skipCharClass returns the index of the ']' closing the character class opened at start.
+func skipCharClass(pattern string, start int) int {
+	i := start + 1
+	if i < len(pattern) && pattern[i] == '^' {
+		i++
+	}
+	if i < len(pattern) && pattern[i] == ']' {
+		i++
+	}
+	for ; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case ']':
+			return i
+		}
+	}
+	return len(pattern)
+}
+
+// parseRepeat parses a {n}, {n,} or {n,m} quantifier starting at start. It returns whether the
+// quantifier allows more than one repetition, whether it is unbounded, and the index of the
+// closing '}' (or -1 when the brace is a literal).
+func parseRepeat(pattern string, start int) (repeatsMany, unbounded bool, end int) {
+	closing := strings.IndexByte(pattern[start:], '}')
+	if closing < 0 {
+		return false, false, -1
+	}
+	end = start + closing
+	minStr, maxStr, hasComma := strings.Cut(pattern[start+1:end], ",")
+	minVal, err := strconv.Atoi(minStr)
+	if err != nil {
+		return false, false, -1
+	}
+	if !hasComma {
+		return minVal > 1, false, end
+	}
+	if maxStr == "" {
+		return true, true, end
+	}
+	maxVal, err := strconv.Atoi(maxStr)
+	if err != nil {
+		return false, false, -1
+	}
+	return maxVal > 1, false, end
+}
+
 // CommonNameAnnotationValidator checks whether the annotation value starts with
 // 'CN=' and is followed by a valid regex.
 func CommonNameAnnotationValidator(s string) error {

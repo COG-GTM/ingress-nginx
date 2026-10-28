@@ -194,6 +194,7 @@ The following table shows a configuration option's name, type, and the default v
 | [limit-rate](#limit-rate)                                                       | int          | 0                                                                                                                                                                                                                                                                                                                                                            |                                                                                     |
 | [limit-rate-after](#limit-rate-after)                                           | int          | 0                                                                                                                                                                                                                                                                                                                                                            |                                                                                     |
 | [lua-shared-dicts](#lua-shared-dicts)                                           | string       | ""                                                                                                                                                                                                                                                                                                                                                           |                                                                                     |
+| [lua-regex-match-limit](#lua-regex-match-limit)                                 | int          | 100000                                                                                                                                                                                                                                                                                                                                                       |                                                                                     |
 | [http-redirect-code](#http-redirect-code)                                       | int          | 308                                                                                                                                                                                                                                                                                                                                                          |                                                                                     |
 | [proxy-buffering](#proxy-buffering)                                             | string       | "off"                                                                                                                                                                                                                                                                                                                                                        |                                                                                     |
 | [limit-req-status-code](#limit-req-status-code)                                 | int          | 503                                                                                                                                                                                                                                                                                                                                                          |                                                                                     |
@@ -1196,6 +1197,15 @@ You can optionally set a size unit to allow for kilobyte-granularity. Allowed un
 ```
 lua-shared-dicts: "certificate_data: 100, my_custom_plugin: 512k"
 ```
+
+## lua-regex-match-limit
+
+Sets [lua_regex_match_limit](https://github.com/openresty/lua-nginx-module#lua_regex_match_limit), the maximum number of PCRE
+backtracking steps a single `ngx.re` match may take before it fails. This bounds the CPU a regular expression evaluated against
+client input, such as the `canary-by-header-pattern` annotation, can consume per request. A pattern that hits the limit is treated
+as not matching. Set to `0` to use the PCRE default (10000000); negative values fall back to the default below.
+
+_**default:**_ 100000
 
 ## http-redirect-code
 

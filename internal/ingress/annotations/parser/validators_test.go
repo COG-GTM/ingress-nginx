@@ -368,3 +368,43 @@ func TestCommonNameAnnotationValidator(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateBacktrackingSafeRegex(t *testing.T) {
+	tests := []struct {
+		pattern string
+		wantErr bool
+	}{
+		{`^Do[A-Z][a-z]+y$`, false},
+		{`^(foo|bar)+$`, false},
+		{`^(ab)*c+$`, false},
+		{`^(a+)?$`, false},
+		{`^(a+){1}$`, false},
+		{`^(a{3})+$`, false},
+		{`^(?:v[0-9]+\.)?canary$`, false},
+		{`^[(a+)+]$`, false},
+		{`^\(a+\)+$`, false},
+		{`[][**da?$&*`, false},
+		{`^(a+)+$`, true},
+		{`^(a*)*$`, true},
+		{`^(a+)*b$`, true},
+		{`^(?:a+)+$`, true},
+		{`^((a+)b)+$`, true},
+		{`^(a|b+)+$`, true},
+		{`^(a+){2}$`, true},
+		{`^(a+){20}$`, true},
+		{`^(\(+)+$`, true},
+		{`^([a-z]+)+$`, true},
+		{`^(\d+)+$`, true},
+		{`^\Q(a+)+\E$`, false},
+		{`^(\Qa\E+)+$`, true},
+		{`^\Q(a+)+`, false},
+		{`^(a+)+$<script>`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			if err := ValidateBacktrackingSafeRegex(tt.pattern); (err != nil) != tt.wantErr {
+				t.Errorf("ValidateBacktrackingSafeRegex(%q) error = %v, wantErr %v", tt.pattern, err, tt.wantErr)
+			}
+		})
+	}
+}

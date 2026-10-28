@@ -154,3 +154,35 @@ func TestAnnotations(t *testing.T) {
 		}
 	}
 }
+
+func TestCanaryHeaderPattern(t *testing.T) {
+	tests := []struct {
+		pattern  string
+		expected string
+	}{
+		{"^Do[A-Z][a-z]+y$", "^Do[A-Z][a-z]+y$"},
+		{"^(a+)+$", ""},
+		{"^(a|aa)*(b+)+$", ""},
+	}
+
+	for _, test := range tests {
+		ing := buildIngress()
+		ing.SetAnnotations(map[string]string{
+			parser.GetAnnotationWithPrefix("canary"):                   "true",
+			parser.GetAnnotationWithPrefix("canary-by-header"):         "X-Canary",
+			parser.GetAnnotationWithPrefix("canary-by-header-pattern"): test.pattern,
+		})
+
+		i, err := NewParser(&resolver.Mock{}).Parse(ing)
+		if err != nil {
+			t.Fatalf("%v: unexpected error %v", test.pattern, err)
+		}
+		canaryConfig, ok := i.(*Config)
+		if !ok {
+			t.Fatalf("%v: expected *Config", test.pattern)
+		}
+		if canaryConfig.HeaderPattern != test.expected {
+			t.Errorf("%v: expected header pattern %q but got %q", test.pattern, test.expected, canaryConfig.HeaderPattern)
+		}
+	}
+}

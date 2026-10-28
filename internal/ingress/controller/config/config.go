@@ -704,6 +704,12 @@ type Configuration struct {
 	// Lua shared dict configuration data / certificate data
 	LuaSharedDicts map[string]int `json:"lua-shared-dicts"`
 
+	// LuaRegexMatchLimit caps the PCRE backtracking steps of a single ngx.re match,
+	// bounding the CPU a pattern such as canary-by-header-pattern can burn per request.
+	// 0 uses the PCRE default.
+	// http://github.com/openresty/lua-nginx-module#lua_regex_match_limit
+	LuaRegexMatchLimit int `json:"lua-regex-match-limit"`
+
 	// DefaultSSLCertificate holds the default SSL certificate to use in the configuration
 	// It can be the fake certificate or the one behind the flag --default-ssl-certificate
 	DefaultSSLCertificate *ingress.SSLCert `json:"-"`
@@ -800,6 +806,7 @@ func NewDefault() Configuration {
 		LogFormatUpstream:                logFormatUpstream,
 		EnableMultiAccept:                true,
 		MaxWorkerConnections:             16384,
+		LuaRegexMatchLimit:               100000,
 		MaxWorkerOpenFiles:               0,
 		MapHashBucketSize:                64,
 		NginxStatusIpv4Whitelist:         defNginxStatusIpv4Whitelist,

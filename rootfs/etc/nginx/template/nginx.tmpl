@@ -70,6 +70,10 @@ http {
 
     lua_shared_dict luaconfig 5m;
 
+    {{ if gt $cfg.LuaRegexMatchLimit 0 }}
+    lua_regex_match_limit {{ $cfg.LuaRegexMatchLimit }};
+    {{ end }}
+
     init_by_lua_file /etc/nginx/lua/ngx_conf_init.lua;
 
     init_worker_by_lua_file /etc/nginx/lua/ngx_conf_init_worker.lua;
