@@ -137,7 +137,11 @@ func TestParseRejectsConfigurationEndpoint(t *testing.T) {
 	if !errors.IsValidationError(err) {
 		t.Fatalf("expected a validation error, got %v", err)
 	}
-	if config := result.(*Config); config.Source != "" || config.Target != "" {
+	config, ok := result.(*Config)
+	if !ok {
+		t.Fatalf("expected a *Config, got %T", result)
+	}
+	if config.Source != "" || config.Target != "" {
 		t.Errorf("expected no mirror, got %+v", config)
 	}
 }
@@ -229,7 +233,12 @@ func TestParseAllowsExternalTargets(t *testing.T) {
 			t.Errorf("unexpected error for %v: %v", target, err)
 			continue
 		}
-		if config := result.(*Config); config.Target != target || config.Source == "" {
+		config, ok := result.(*Config)
+		if !ok {
+			t.Errorf("expected a *Config for %v, got %T", target, result)
+			continue
+		}
+		if config.Target != target || config.Source == "" {
 			t.Errorf("expected mirror to %v, got %+v", target, config)
 		}
 	}
