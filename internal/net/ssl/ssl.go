@@ -525,8 +525,26 @@ func (tl *TLSListener) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, e
 }
 
 // SetClientCA configures the listener to require and verify client certificates
-// signed by one of the CA certificates in the PEM file at caPath.
+// signed by one of the CA certificates in the PEM file at caPath. The file is
+// watched and reloaded on change; if a reload fails the last valid CA bundle is kept.
 func (tl *TLSListener) SetClientCA(caPath string) error {
+	if err := tl.loadClientCA(caPath); err != nil {
+		return err
+	}
+
+	_, err := file.NewFileWatcher(caPath, func() {
+		if err := tl.loadClientCA(caPath); err != nil {
+			klog.Errorf("keeping previous client CA: %v", err)
+		}
+	})
+	if err != nil {
+		klog.Errorf("unexpected error watching client CA file %v: %v", caPath, err)
+	}
+	return nil
+}
+
+func (tl *TLSListener) loadClientCA(caPath string) error {
+	klog.InfoS("loading client CA", "path", caPath)
 	caBytes, err := os.ReadFile(caPath)
 	if err != nil {
 		return fmt.Errorf("reading client CA file %v: %w", caPath, err)
@@ -541,9 +559,7 @@ func (tl *TLSListener) SetClientCA(caPath string) error {
 	return nil
 }
 
-// TLSConfig instantiates a TLS configuration, always providing an up to date certificate.
-// If a client CA was configured, clients must present a certificate signed by it.
-func (tl *TLSListener) TLSConfig() *tls.Config {
+func (tl *TLSListener) newTLSConfig() *tls.Config {
 	cfg := &tls.Config{
 		GetCertificate: tl.GetCertificate,
 		MinVersion:     tls.VersionTLS12,
@@ -553,6 +569,19 @@ func (tl *TLSListener) TLSConfig() *tls.Config {
 	if tl.clientCAs != nil {
 		cfg.ClientCAs = tl.clientCAs
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return cfg
+}
+
+// TLSConfig instantiates a TLS configuration, always providing an up to date certificate.
+// If a client CA was configured, clients must present a certificate signed by the
+// current CA bundle.
+func (tl *TLSListener) TLSConfig() *tls.Config {
+	cfg := tl.newTLSConfig()
+	if cfg.ClientCAs != nil {
+		cfg.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			return tl.newTLSConfig(), nil
+		}
 	}
 	return cfg
 }

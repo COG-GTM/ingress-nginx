@@ -586,4 +586,31 @@ func TestTLSListenerClientCA(t *testing.T) {
 			t.Errorf("request with trusted client certificate should succeed, got: %v", err)
 		}
 	})
+
+	t.Run("an invalid CA bundle reload keeps the previous CA", func(t *testing.T) {
+		if err := os.WriteFile(caFile.Name(), []byte("not a certificate"), 0o600); err != nil {
+			t.Fatalf("unexpected error writing CA file: %v", err)
+		}
+		if err := listener.loadClientCA(caFile.Name()); err == nil {
+			t.Fatalf("expected error loading invalid client CA")
+		}
+		if err := get(clientCertFor(clientCA)); err != nil {
+			t.Errorf("previous CA should still be trusted, got: %v", err)
+		}
+	})
+
+	t.Run("a rotated CA bundle applies to new connections", func(t *testing.T) {
+		if err := os.WriteFile(caFile.Name(), encodeCertPEM(otherCA.Cert), 0o600); err != nil {
+			t.Fatalf("unexpected error writing CA file: %v", err)
+		}
+		if err := listener.loadClientCA(caFile.Name()); err != nil {
+			t.Fatalf("unexpected error reloading client CA: %v", err)
+		}
+		if err := get(clientCertFor(otherCA)); err != nil {
+			t.Errorf("request with certificate from rotated CA should succeed, got: %v", err)
+		}
+		if get(clientCertFor(clientCA)) == nil {
+			t.Errorf("request with certificate from the old CA should fail after rotation")
+		}
+	})
 }

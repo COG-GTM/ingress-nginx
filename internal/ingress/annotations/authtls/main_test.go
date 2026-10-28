@@ -243,6 +243,16 @@ func TestInvalidAnnotations(t *testing.T) {
 	}
 	delete(data, parser.GetAnnotationWithPrefix(annotationAuthTLSMatchCN))
 
+	parser.EnableAnnotationValidation = false
+	data[parser.GetAnnotationWithPrefix(annotationAuthTLSMatchCN)] = "CN=a #(\n){}\n}\nssl_engine x;"
+	ing.SetAnnotations(data)
+	_, err = NewParser(fakeSecret).Parse(ing)
+	parser.EnableAnnotationValidation = true
+	if err == nil {
+		t.Errorf("Expected error with injected CN even when annotation validation is disabled, but got nil")
+	}
+	delete(data, parser.GetAnnotationWithPrefix(annotationAuthTLSMatchCN))
+
 	ing.SetAnnotations(data)
 
 	i, err := NewParser(fakeSecret).Parse(ing)
