@@ -180,7 +180,7 @@ func isLocalExternalName(externalName string) bool {
 		return false
 	}
 
-	if ip.To4() == nil && net.IP(ip[:12]).Equal(net.IPv6zero[:12]) {
+	if ip.To4() == nil && ip[:12].Equal(net.IPv6zero[:12]) {
 		// IPv4-compatible IPv6 address (::a.b.c.d)
 		ip = ip[12:]
 	}
